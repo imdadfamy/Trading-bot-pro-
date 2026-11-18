@@ -1,0 +1,161 @@
+{
+  "roles": {
+    "graph": "Analyste graphique",
+    "news": "Veilleur mondial",
+    "quant": "Analyste quantitatif",
+    "risk": "Contrôleur des risques",
+    "director": "Directeur IA",
+    "graph:baseline": "Analyste graphique (base déterministe)",
+    "news:baseline": "Veilleur mondial (base déterministe)",
+    "quant:baseline": "Analyste quantitatif (base déterministe)"
+  },
+  "roleHelp": {
+    "graph": "Structure et tendance des prix",
+    "news": "Actualités mondiales",
+    "quant": "Régimes et statistiques",
+    "risk": "Veto déterministe",
+    "director": "Synthèse et décision"
+  },
+  "actions": {
+    "BUY": "ACHAT (avis de recherche)",
+    "SELL": "VENTE (avis de recherche)",
+    "WAIT": "ATTENTE (aucune entrée)"
+  },
+  "status": {
+    "unconfirmed": "non confirmé",
+    "confirmed": "confirmé",
+    "retracted": "démenti",
+    "candidate": "candidat, non validé",
+    "validated": "validé",
+    "expired": "expiré"
+  },
+  "severity": {
+    "low": "faible",
+    "medium": "moyenne",
+    "critical": "critique"
+  },
+  "relevance": {
+    "high": "élevée",
+    "medium": "moyenne",
+    "low": "faible",
+    "none": "nulle",
+    "unclassified": "non classée"
+  },
+  "values": {
+    "disconnected": "Non connecté",
+    "unconnected": "Non connecté",
+    "observation": "Observation (aucun ordre)",
+    "demo": "Démo",
+    "none": "Aucun"
+  },
+  "events": {
+    "backtest.completed": "Backtest terminé",
+    "budget.exceeded": "Budget IA dépassé",
+    "calendar.received": "Calendrier économique reçu",
+    "experiment.drafted": "Brouillon d'expérience créé",
+    "market.snapshot": "Instantané de marché enregistré",
+    "memory.recorded": "Note enregistrée en mémoire",
+    "model.compared": "Réponse du modèle comparée à la base",
+    "model.invalid": "Réponse du modèle invalide ou indisponible",
+    "news.critical": "Actualité critique reçue",
+    "news.received": "Actualité reçue",
+    "order.preflight_rejected": "Ordre refusé avant envoi",
+    "order.reconciled": "Ordre rapproché avec le compte",
+    "order.reserved": "Intention d'ordre réservée",
+    "order.result": "Résultat d'ordre reçu",
+    "order.uncertain": "Ordre d'état incertain",
+    "risk.kill_switch": "Arrêt des nouvelles entrées activé",
+    "settings.changed": "Réglages modifiés",
+    "signal.created": "Signal de recherche créé",
+    "synthetic.reported": "Étude d'indice synthétique enregistrée"
+  },
+  "gates": {
+    "broker_demo_verified": [
+      "Compte démo vérifié",
+      "Le compte du courtier est bien un compte démo et son contrat XAUUSD est confirmé."
+    ],
+    "broker_hours_verified": [
+      "Horaires du courtier vérifiés",
+      "Les heures d'ouverture et de fermeture réelles du courtier sont connues."
+    ],
+    "market_freshness_verified": [
+      "Fraîcheur des cours vérifiée",
+      "Les cotations arrivent à temps et ne sont jamais périmées."
+    ],
+    "news_licence_verified": [
+      "Licence des actualités vérifiée",
+      "Le droit d'utiliser et de conserver les actualités est confirmé."
+    ],
+    "news_coverage_verified": [
+      "Couverture des actualités vérifiée",
+      "Les sources couvrent assez le marché de l'or pour une veille fiable."
+    ],
+    "risk_tests_passed": [
+      "Tests du contrôle des risques réussis",
+      "Les limites de perte et de taille de position ont été testées de bout en bout."
+    ],
+    "idempotency_reconciliation_passed": [
+      "Anti-doublon et rapprochement des ordres validés",
+      "Un même ordre ne part jamais deux fois et l'état réel du compte est retrouvé après une panne."
+    ],
+    "stops_verified": [
+      "Stops de protection vérifiés",
+      "Les ordres de protection sont bien posés chez le courtier."
+    ],
+    "kill_switch_worker_connected": [
+      "Arrêt d'urgence relié à l'exécution",
+      "Le bouton d'arrêt coupe réellement le programme qui envoie les ordres."
+    ],
+    "operator_approved_limits": [
+      "Limites approuvées par l'opérateur",
+      "Vous avez validé les plafonds de risque et de budget."
+    ],
+    "strategy_frozen": [
+      "Stratégie figée",
+      "La stratégie testée ne change plus pendant les 14 jours."
+    ],
+    "model_budget_frozen": [
+      "Budget IA figé",
+      "Le budget des modèles est fixé avant le début de l'expérience."
+    ],
+    "backup_restore_tested": [
+      "Restauration des sauvegardes testée",
+      "Une sauvegarde a été restaurée avec succès sur une copie."
+    ],
+    "alerts_tested": [
+      "Alertes testées",
+      "Les alertes critiques arrivent bien jusqu'à vous."
+    ]
+  },
+  "rationales": {
+    "At least 20 closed candles required": "Au moins 20 bougies closes sont nécessaires.",
+    "Trend below threshold": "Tendance trop faible, sous le seuil.",
+    "Five versus twenty closed-candle mean; research only": "Moyenne des 5 dernières bougies comparée à celle des 20 ; recherche seulement.",
+    "Critical event or no verified source coverage": "Événement critique ou aucune source vérifiée.",
+    "Source URLs alone do not establish directional impact": "Des liens de sources ne suffisent pas à établir une direction.",
+    "Insufficient distribution sample": "Échantillon statistique insuffisant.",
+    "Risk engine alone determines sizing and veto": "Seul le moteur de risque décide de la taille et du veto.",
+    "Insufficient or conflicting independent analyses": "Analyses insuffisantes ou contradictoires.",
+    "Critical event: suspend new entries": "Événement critique : nouvelles entrées suspendues.",
+    "Agreement across all four agents; deterministic risk check still required": "Accord des quatre rôles ; le contrôle de risque déterministe reste obligatoire.",
+    "Call cost above configured cap": "Coût de l'appel au-dessus du plafond configuré.",
+    "Model budget exhausted": "Budget IA épuisé.",
+    "Actual model cost exceeded budget": "Coût réel au-dessus du budget.",
+    "Provider unavailable or invalid structured output": "Modèle indisponible ou réponse invalide."
+  },
+  "rationalePatterns": [
+    [
+      "^Observed return volatility ([0-9.]+); no calibrated edge$",
+      "Volatilité observée des rendements : $1 ; aucun avantage calibré."
+    ]
+  ],
+  "families": {
+    "volatility": "Volatility (volatilité constante)",
+    "boom": "Boom (hausses brusques)",
+    "crash": "Crash (baisses brusques)",
+    "step": "Step (pas fixes)",
+    "range_break": "Range Break (sorties de fourchette)",
+    "jump": "Jump (sauts aléatoires)",
+    "other": "Autre"
+  }
+}

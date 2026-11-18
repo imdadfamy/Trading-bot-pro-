@@ -10,6 +10,30 @@ const content = document.getElementById("content");
 const notice = document.getElementById("notice");
 let active = "Command Center";
 let renderSequence = 0;
+let L = null;
+async function ensureLabels() {
+  if (L) return L;
+  try { L = await (await fetch("/labels.json", { cache: "no-store" })).json(); }
+  catch { L = { roles: {}, roleHelp: {}, actions: {}, status: {}, severity: {}, relevance: {}, values: {}, events: {}, gates: {}, rationales: {}, rationalePatterns: [] }; }
+  return L;
+}
+const fr = (table, key, fallback) => (typeof key === "string" && key) ? ((L?.[table] || {})[key] ?? fallback ?? key) : (fallback ?? "—");
+const role = agent => fr("roles", agent);
+const action = value => fr("actions", value);
+function rationale(text) {
+  if (typeof text !== "string" || !text) return "—";
+  const known = L?.rationales?.[text];
+  if (known) return known;
+  for (const [pattern, replacement] of (L?.rationalePatterns || [])) {
+    const match = new RegExp(pattern).exec(text);
+    if (match) return replacement.replace(/\$(\d)/g, (_, n) => match[Number(n)] ?? "");
+  }
+  return text;
+}
+function when(iso) {
+  const date = new Date(iso);
+  return (typeof iso === "string" && !Number.isNaN(date.getTime())) ? date.toLocaleString("fr-FR", { dateStyle: "medium", timeStyle: "short", timeZone: "UTC" }) + " UTC" : "—";
+}
 const labels = {
   "Command Center":"Vue d'ensemble", "AI Agents":"Agents IA", "Skills Library":"27 compétences",
   "Market Intelligence":"Actualités et marché", "Trading Terminal":"Journal des signaux",
@@ -58,17 +82,20 @@ function chart(candles) {
   svg.appendChild(line);append(panel,svg,node("div","sub",`${series.length} clôtures · ${value(candles[0].broker)} · Historique, non live`));return panel;
 }
 async function dashboard(sequence) {
-  const [data,history]=await Promise.all([get("/dashboard"),get("/market/candles")]);
+  const [data,history,runs,signals]=await Promise.all([get("/dashboard"),get("/market/candles"),get("/agents").catch(()=>[]),get("/signals").catch(()=>[])]);
   if (sequence !== renderSequence) return;
+  const latest={};
+  (Array.isArray(runs)?runs:[]).forEach(run=>{if(typeof run.agent==="string"&&!run.agent.includes(":")&&!(run.agent in latest))latest[run.agent]=String(run.action);});
+  if(Array.isArray(signals)&&signals[0]?.action)latest.director=String(signals[0].action);
   append(content,info("Recherche locale sur données d'exemple. Aucun courtier, flux live ou ordre n'est connecté."));
   const snap=data.snapshot;
-  if(snap) append(content,info(`Dernier snapshot : ${snap.observed_at} · ${freshness(snap)} · ${snap.broker}`,true));
-  append(content,grid("metrics",stat("Capital démo","—","Compte non connecté"),stat("Equity","—","Aucun compte démo"),stat("P&L réel","—","Aucun fill MT5"),stat("Décisions",value(data.signal_count),"Cycles de recherche")));
-  const agents=card("Cinq rôles · état de recherche");
-  ["Analyste graphique","Veilleur mondial","Analyste quantitatif","Contrôleur des risques","Directeur IA"].forEach((name,i)=>append(agents,row([`${String(i+1).padStart(2,"0")}  ${name}`,"Aucune connexion API active","EN ATTENTE"])));
+  if(snap) append(content,info(`Dernier instantané de marché : ${when(snap.observed_at)} · ${freshness(snap)} · ${snap.broker}`,true));
+  append(content,grid("metrics",stat("Capital démo","—","Compte non connecté"),stat("Valeur du compte","—","Aucun compte démo"),stat("Résultat réel","—","Aucun ordre exécuté"),stat("Décisions",value(data.signal_count),"Cycles de recherche")));
+  const agents=card("Dernier avis de chaque rôle");
+  ["graph","news","quant","risk","director"].forEach((id,i)=>append(agents,row([`${String(i+1).padStart(2,"0")}  ${role(id)}`,fr("roleHelp",id),latest[id]?action(latest[id]):"AUCUN CYCLE"])));
   append(content,grid("two",chart(history.candles||[]),agents));
-  const logs=card("Journal récent");(data.events||[]).slice(0,8).forEach(e=>append(logs,row([e.kind,e.at])));if(!data.events?.length)append(logs,empty("Aucun événement"));
-  const risk=card("Contrôle opérationnel");labeled(risk,{arrêt_des_entrées:data.kill_switch?"Actif":"À vérifier",broker:data.broker,mode:data.mode,compte_réel:"Interdit"});
+  const logs=card("Journal récent");(data.events||[]).slice(0,8).forEach(e=>append(logs,row([fr("events",e.kind),when(e.at)])));if(!data.events?.length)append(logs,empty("Aucun événement"));
+  const risk=card("Contrôle opérationnel");labeled(risk,{arrêt_des_nouvelles_entrées:data.kill_switch?"Actif":"À vérifier",courtier:fr("values",data.broker),mode:fr("values",data.mode),compte_réel:"Interdit"});
   append(content,grid("two",logs,risk));
 }
 function renderList(title, list, fields, missing) {
@@ -81,11 +108,11 @@ async function generic(page,sequence) {
   const data=await get(endpoints[page]);
   if (sequence !== renderSequence) return;
   if(explanations[page])append(content,info(explanations[page]));
-  if(page==="Skills Library") { append(content,info("Catalogue versionné : spécifications, pas 27 stratégies validées."));renderList("27 compétences",data,["name","owner","state"],"Catalogue vide"); }
-  if(page==="AI Agents") renderList("Analyses par cycle",data,["agent","action","rationale"],"Aucun cycle lancé");
-  if(page==="Market Intelligence") { append(content,info("Les événements d'exemple sont synthétiques. Aucune veille mondiale continue n'est active.",true));renderList("Articles vérifiés ou en attente",data.map(item=>({...item,label:`${item.status} · ${item.severity} · pertinence ${item.relevance||"non classée"}`})),["headline","label"],"Aucun article reçu");const releases=await get("/calendar/events").catch(()=>[]);if(sequence!==renderSequence)return;renderList("Calendrier économique importé",releases,["scheduled_at","country","event","importance"],"Aucun événement de calendrier importé"); }
-  if(page==="Trading Terminal") { append(content,info("Journal des décisions de recherche. Aucun ordre MT5 n’a été envoyé."));renderList("Signaux",data,["action","symbol","rationale"],"Aucun signal"); }
-  if(page==="AI Memory") renderList("Erreurs et recommandations",data,["cause","evidence","recommendation"],"Aucune mémoire enregistrée");
+  if(page==="Skills Library") { append(content,info("Catalogue versionné : spécifications, pas 27 stratégies validées."));renderList("27 compétences",data.map(e=>({...e,roleName:role(e.owner),stateLabel:"spécification"})),["name","roleName","stateLabel"],"Catalogue vide"); }
+  if(page==="AI Agents") renderList("Analyses par cycle",data.map(e=>({who:role(e.agent),why:rationale(e.rationale),act:action(e.action)})),["who","why","act"],"Aucun cycle lancé");
+  if(page==="Market Intelligence") { append(content,info("Les événements d'exemple sont synthétiques. Aucune veille mondiale continue n'est active.",true));renderList("Articles reçus",data.map(item=>({headline:item.headline,label:`${item.source} · ${when(item.published_at)} · ${fr("status",item.status)} · gravité ${fr("severity",item.severity)} · pertinence ${fr("relevance",item.relevance,"non classée")}`})),["headline","label"],"Aucun article reçu");const releases=await get("/calendar/events").catch(()=>[]);if(sequence!==renderSequence)return;renderList("Calendrier économique importé",releases.map(r=>({when:when(r.scheduled_at),country:r.country,event:r.event,imp:`importance ${r.importance}/3`})),["when","country","event","imp"],"Aucun événement de calendrier importé"); }
+  if(page==="Trading Terminal") { append(content,info("Journal des décisions de recherche. Aucun ordre MT5 n’a été envoyé."));renderList("Signaux",data.map(s=>({sym:`${s.symbol} · ${fr("status",s.status)}`,why:rationale(s.rationale),act:action(s.action)})),["sym","why","act"],"Aucun signal"); }
+  if(page==="AI Memory") renderList("Désaccords, pannes et recommandations",data,["cause","recommendation"],"Aucune mémoire enregistrée");
   if(page==="Strategy Lab") {
     append(content,info("Les chiffres de l’exemple synthétique ne mesurent aucune performance de marché.",true));
     const panel=card("Backtests locaux"); if(!data.length)append(panel,empty("Aucun backtest enregistré"));
@@ -93,13 +120,19 @@ async function generic(page,sequence) {
     const studies=await get("/synthetic/reports").catch(()=>[]);if(sequence!==renderSequence)return;
     append(content,info("Indices synthétiques : statistiques descriptives hors ligne. Elles ne prédisent rien, ne produisent aucun signal et ne sont reliées à aucun ordre.",true));
     const study=card("Études d'indices synthétiques");if(!studies.length)append(study,empty("Aucune étude enregistrée (commande analyze-synthetic --save)"));
-    else studies.forEach(item=>{const r=item.report||{};append(study,row([`${item.symbol} · ${item.family}`,`${value(r.all?.observations)} bougies · sauts ${value(r.all?.absolute_jump_count)} (hausse ${value(r.all?.up_jump_count)} / baisse ${value(r.all?.down_jump_count)},${value(r.all?.absolute_jump_frequency===null||r.all?.absolute_jump_frequency===undefined?null:Math.round(r.all.absolute_jump_frequency*10000)/100)} %)`,r.statistically_sufficient?"ÉCHANTILLON SUFFISANT":"ÉCHANTILLON INSUFFISANT"]));});
+    else studies.forEach(item=>{const r=item.report||{};const f=r.all?.absolute_jump_frequency;append(study,row([`${item.symbol} · ${fr("families",item.family)}`,`${value(r.all?.observations)} bougies · ${value(r.all?.absolute_jump_count)} sauts brusques (${f===null||f===undefined?"—":(Math.round(f*10000)/100).toLocaleString("fr-FR")} %) : ${value(r.all?.up_jump_count)} à la hausse, ${value(r.all?.down_jump_count)} à la baisse`,r.statistically_sufficient?"ÉCHANTILLON SUFFISANT":"ÉCHANTILLON INSUFFISANT"]));});
     append(content,study);
   }
-  if(page==="Session Analytics") {const panel=card("Sessions indicatives");labeled(panel,{session_principale:data.primary,sessions_actives:data.active,horaires_courtier_vérifiés:data.broker_hours_verified,horodatage_utc:data.as_of});append(content,panel);}
+  if(page==="Session Analytics") {const panel=card("Sessions indicatives");labeled(panel,{session_principale:data.primary,sessions_actives:data.active,horaires_courtier_vérifiés:data.broker_hours_verified,évalué_le:when(data.as_of)});append(content,panel);}
   if(page==="Budget Center") {const panel=card("Coûts IA enregistrés");labeled(panel,{dépense_totale_usd:data.total_usd,dépense_du_jour_usd:data.today_usd,plafond_quotidien_usd:data.daily_limit_usd,plafond_expérience_usd:data.experiment_limit_usd,appels:data.calls,nouveaux_appels_bloqués:data.new_model_calls_blocked});append(content,panel);}
-  if(page==="Risk Center") {const panel=card("Contrôle du risque");labeled(panel,{arrêt:data.kill_switch?"ACTIF":"INCONNU",broker:data.broker,mode:data.mode,intentions_à_réconcilier:data.pending_order_intents,trading_réel:data.live_trading});append(panel,info("Le bouton d’arrêt se trouve en haut de chaque écran. La liaison au worker MT5 reste à intégrer.",true));append(content,panel);}
-  if(page==="API & Integrations") {const panel=card("Préparation des intégrations");labeled(panel,{revue_locale_prête:data.ready_for_local_review,test_démo_14_jours_prêt:data.ready_for_14_day_demo,mode:data.execution_mode,arrêt:data.kill_switch});if(data.credentials)labeled(panel,{compte_MT5_démo_renseigné:data.credentials.mt5_demo_account_configured,clé_IA_présente:data.credentials.openai_key_present,clé_actualités_présente:data.credentials.newsapi_key_present,clé_calendrier_présente:data.credentials.tradingeconomics_key_present,connexions_vérifiées:data.credentials.verified});append(panel,info("La présence d'une clé ne prouve pas la connexion. Préconditions restantes : "+data.blocked_gates.join(", "),true));append(content,panel);}
+  if(page==="Risk Center") {const panel=card("Contrôle du risque");labeled(panel,{arrêt_des_nouvelles_entrées:data.kill_switch?"ACTIF":"INCONNU",courtier:fr("values",data.broker),mode:fr("values",data.mode),ordres_à_vérifier_à_la_main:data.pending_order_intents,trading_réel_autorisé:data.live_trading});append(panel,info("Le bouton d’arrêt se trouve en haut de chaque écran. La liaison au worker MT5 reste à intégrer.",true));append(content,panel);}
+  if(page==="API & Integrations") {
+    const panel=card("Préparation des intégrations");labeled(panel,{revue_locale_prête:data.ready_for_local_review,démo_14_jours_prête:data.ready_for_14_day_demo,mode_d_exécution:fr("values",data.execution_mode),arrêt_des_nouvelles_entrées:data.kill_switch});
+    if(data.credentials)labeled(panel,{compte_MT5_démo_renseigné:data.credentials.mt5_demo_account_configured,clé_OpenAI_présente:data.credentials.openai_key_present,clé_NewsAPI_présente:data.credentials.newsapi_key_present,clé_calendrier_présente:data.credentials.tradingeconomics_key_present,connexions_vérifiées:data.credentials.verified});
+    append(panel,info("Une clé présente ne prouve pas que la connexion fonctionne.",true));append(content,panel);
+    const gates=card(`Conditions encore à remplir (${(data.blocked_gates||[]).length})`);
+    (data.blocked_gates||[]).forEach(id=>{const g=(L?.gates||{})[id]||[id,""];append(gates,row([g[0],g[1]]));});append(content,gates);
+  }
 }
 function formLabel(text,type,valueNow) {const label=node("label","",text);const input=node("input");input.type=type;input.value=valueNow??"";append(label,input);return [label,input];}
 function settingsPage() {
@@ -138,7 +171,7 @@ async function render(page) {
   content.replaceChildren();notice.replaceChildren();
   if(page==="Settings"){settingsPage();return;}
   const placeholder=node("div","loading-panel","Chargement des données locales…");append(content,placeholder);
-  try{if(page==="Command Center")await dashboard(sequence);else await generic(page,sequence);if(sequence===renderSequence)placeholder.remove();}
+  try{await ensureLabels();if(page==="Command Center")await dashboard(sequence);else await generic(page,sequence);if(sequence===renderSequence)placeholder.remove();}
   catch(error){if(sequence!==renderSequence)return;content.replaceChildren();append(notice,info(`API indisponible : ${String(error)}. Vérifiez le serveur local.`,true));}
 }
 pages.forEach(page=>{const button=node("button","",labels[page]);button.type="button";button.dataset.page=page;button.addEventListener("click",()=>render(page));append(nav,button);});

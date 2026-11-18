@@ -39,23 +39,38 @@ function complete(url, data) {
   assert.notEqual(index, -1, `Requête absente : ${url}`);
   pending.splice(index, 1)[0].resolve({ ok: true, json: async () => data });
 }
+const tick = () => new Promise(resolve => setImmediate(resolve));
 function text(element) { return element.textContent + element.children.map(text).join(" "); }
 async function run() {
+  // The initial render of the home page first asks for the shared labels, then the dashboard data.
+  await tick();
+  complete("/labels.json", { actions: { WAIT: "ATTENTE (aucune entrée)" }, roles: { quant: "Analyste quantitatif" } });
+  await tick();
+  for (const url of ["/dashboard", "/agents", "/signals"]) complete(url, url === "/dashboard" ? { events: [] } : []);
+  complete("/market/candles", { candles: [] });
+  await tick();
   const agents = vm.runInContext('render("AI Agents")', context);
   const skills = vm.runInContext('render("Skills Library")', context);
+  await tick();
   complete("/skills", [{ name: "Compétence visible", owner: "quant", state: "specification" }]);
   await skills;
+  await tick();
   const content = document.getElementById("content");
   assert.match(text(content), /Compétence visible/);
+  assert.match(text(content), /Analyste quantitatif/); // shared French label applied
   assert.doesNotMatch(text(content), /Chargement des données/);
   complete("/agents", [{ agent: "ANCIENNE RÉPONSE", action: "WAIT" }]);
   await agents;
+  await tick();
   assert.match(text(content), /Compétence visible/);
   assert.doesNotMatch(text(content), /ANCIENNE RÉPONSE/);
-  complete("/dashboard", {});
+  const home = vm.runInContext('render("Command Center")', context);
+  await tick();
+  for (const url of ["/dashboard", "/agents", "/signals"]) complete(url, url === "/dashboard" ? { events: [] } : []);
   complete("/market/candles", { candles: [] });
-  await Promise.resolve();
+  await home;
   assert.doesNotMatch(text(content), /ANCIENNE RÉPONSE/);
+  assert.match(text(content), /AUCUN CYCLE/);
   console.log("Navigation locale : réponses obsolètes ignorées.");
 }
 run().catch(error => { console.error(error); process.exitCode = 1; });

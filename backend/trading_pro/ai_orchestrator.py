@@ -18,6 +18,10 @@ from .models import Budget, Provider, run_model
 from .prompts import MODEL_AGENTS, build_inputs, prompt_tag
 from .store import ResearchStore
 
+ROLE_FR = {"graph": "Analyste graphique", "news": "Veilleur mondial", "quant": "Analyste quantitatif"}
+ACTION_FR = {"BUY": "ACHAT", "SELL": "VENTE", "WAIT": "ATTENTE"}
+FAILURE_FR = {"cost_cap": "coût au-dessus du plafond", "budget_exhausted": "budget épuisé",
+              "budget_exceeded": "budget dépassé", "unavailable": "indisponible ou réponse invalide"}
 FALLBACKS = {
     "Call cost above configured cap": "cost_cap",
     "Model budget exhausted": "budget_exhausted",
@@ -61,16 +65,18 @@ def analyze_with_models(store: ResearchStore, provider: Provider, *, symbol: str
                             "model_status": failure or "answered", "prompt": prompt_tag(agent)})
         store.journal.log("model.compared", cycle_id, comparisons[-1])
         if failure:
-            store.remember(cause=f"{agent}: model unavailable ({failure})",
+            store.remember(cause=f"{ROLE_FR[agent]} : modèle indisponible ({FAILURE_FR[failure]})",
                            evidence=json.dumps({"rationale": report.rationale, "prompt": prompt_tag(agent)}),
-                           recommendation="Check budget, prices, key and provider status; the cycle fell back to WAIT.",
+                           recommendation="Vérifier le budget, les tarifs, la clé et l'état du fournisseur ; "
+                                          "le cycle est revenu à ATTENTE (WAIT).",
                            cycle_id=cycle_id)
         elif not agree:
-            store.remember(cause=f"{agent}: model {report.action.value} differs from baseline "
-                                 f"{baseline[agent].action.value}",
+            store.remember(cause=f"{ROLE_FR[agent]} : le modèle répond {ACTION_FR[report.action.value]} alors que "
+                                 f"la base déterministe répond {ACTION_FR[baseline[agent].action.value]}",
                            evidence=json.dumps({"baseline": baseline[agent].rationale[:300],
                                                 "model": report.rationale[:500], "prompt": prompt_tag(agent)}),
-                           recommendation="Read both rationales; no automatic change of strategy or parameters.",
+                           recommendation="Lire les deux justifications ; aucune modification automatique "
+                                          "de la stratégie ni des paramètres.",
                            cycle_id=cycle_id)
         store.analysis(cycle_id, replace(baseline[agent], agent=f"{agent}:baseline"))
     for name, report in final.items():

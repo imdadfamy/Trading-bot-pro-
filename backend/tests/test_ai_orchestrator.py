@@ -102,7 +102,7 @@ class OrchestratorTests(unittest.TestCase):
             self.assertTrue({"graph", "graph:baseline", "news:baseline", "quant", "risk"} <= names)
             memory = store.recent("memory", 10)
             self.assertEqual(len(memory), 2)  # graph (SELL vs BUY) and news (BUY vs WAIT)
-            self.assertTrue(all("no automatic change" in m["recommendation"].lower() for m in memory))
+            self.assertTrue(all("aucune modification automatique" in m["recommendation"].lower() for m in memory))
             self.assertEqual(len(store.recent("model_usage", 10)), 3)
             self.assertTrue(store.journal.verify_audit())
             for report in result["agents"]:
@@ -128,7 +128,7 @@ class OrchestratorTests(unittest.TestCase):
                                 for c in result["comparisons"]))
             causes = [m["cause"] for m in store.recent("memory", 10)]
             self.assertEqual(len(causes), 3)
-            self.assertTrue(all("unavailable" in c for c in causes))
+            self.assertTrue(all("indisponible" in c for c in causes))
 
     def test_budget_blocks_calls_before_they_are_made(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -219,7 +219,9 @@ class CommandTests(unittest.TestCase):
     def invoke(self, *argv, provider=None):
         from trading_pro import cli
         output = io.StringIO()
-        patches = [mock.patch.object(sys, "argv", ["cli", *argv])]
+        # Hermetic: never load the real .env.local (it holds a live key and prices).
+        patches = [mock.patch.object(sys, "argv", ["cli", *argv]),
+                   mock.patch("trading_pro.local_env.load_local_env", return_value=())]
         if provider is not None:
             patches.append(mock.patch("trading_pro.openai_provider.provider_from_env", return_value=provider))
         with contextlib.ExitStack() as stack:

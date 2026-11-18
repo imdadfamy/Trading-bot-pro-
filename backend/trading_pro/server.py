@@ -55,7 +55,8 @@ def handler_factory(service: Service, operator_key: str | None = None):
             path = urlsplit(self.path).path
             static_files = {"/": ("index.html", "text/html; charset=utf-8"),
                             "/preview.css": ("preview.css", "text/css; charset=utf-8"),
-                            "/preview.js": ("preview.js", "text/javascript; charset=utf-8")}
+                            "/preview.js": ("preview.js", "text/javascript; charset=utf-8"),
+                            "/labels.json": ("labels.json", "application/json; charset=utf-8")}
             if path in static_files:
                 return self._static(*static_files[path])
             if path in {"/settings", "/audit", "/audit/integrity", "/export/signals.csv", "/orders/intents"} and not self._authorized():
