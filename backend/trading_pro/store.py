@@ -93,6 +93,15 @@ class ResearchStore:
     def news(self, value: NewsEvent) -> bool:
         payload = json.dumps(asdict(value), default=str)
         with self.journal.connect() as db:
+            latest = db.execute("SELECT payload FROM news_event_versions WHERE event_id=? "
+                                "ORDER BY received_at DESC LIMIT 1", (value.event_id,)).fetchone()
+            if latest is not None:
+                previous = json.loads(latest["payload"])
+                current = json.loads(payload)
+                previous.pop("received_at", None)
+                current.pop("received_at", None)
+                if previous == current:  # re-polling the same state must not create a new version
+                    return False
             inserted = db.execute("INSERT OR IGNORE INTO news_event_versions VALUES(?,?,?,?)",
                                   (value.event_id, value.received_at.isoformat(), value.status, payload)).rowcount == 1
             db.execute("INSERT OR IGNORE INTO news_events VALUES(?,?,?,?,?)",

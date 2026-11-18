@@ -68,6 +68,22 @@ class ResearchTests(unittest.TestCase):
             self.assertEqual(store.news_as_of(at+timedelta(minutes=1))[0]["status"], "unconfirmed")
             self.assertEqual(store.news_as_of(at+timedelta(minutes=6))[0]["status"], "retracted")
 
+    def test_repolling_unchanged_event_does_not_create_new_versions(self):
+        at = datetime(2025, 1, 6, 10, tzinfo=timezone.utc)
+        def event(received, status="unconfirmed"):
+            return normalize_event(source="wire", url="https://example.org/a", headline="Headline",
+                                   published_at=at, received_at=received, severity="low", status=status)
+        with tempfile.TemporaryDirectory() as tmp:
+            store = ResearchStore(str(Path(tmp)/"db.sqlite"))
+            self.assertTrue(store.news(event(at+timedelta(minutes=1))))
+            self.assertFalse(store.news(event(at+timedelta(hours=1))))
+            self.assertFalse(store.news(event(at+timedelta(hours=2))))
+            with store.journal.connect() as db:
+                self.assertEqual(db.execute("SELECT COUNT(*) FROM news_event_versions").fetchone()[0], 1)
+            self.assertTrue(store.news(event(at+timedelta(hours=3), status="retracted")))
+            with store.journal.connect() as db:
+                self.assertEqual(db.execute("SELECT COUNT(*) FROM news_event_versions").fetchone()[0], 2)
+
     def test_metrics_undefined_without_losses(self):
         summary = performance([TradeResult(10, 5, 1, "London", "baseline")], 10000)
         self.assertIsNone(summary["profit_factor"])
