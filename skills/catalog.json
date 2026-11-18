@@ -1,0 +1,191 @@
+[
+  {
+    "id": "market-structure",
+    "name": "Market Structure",
+    "owner": "graph",
+    "version": "0.1.0",
+    "state": "research_specification"
+  },
+  {
+    "id": "price-action",
+    "name": "Price Action",
+    "owner": "graph",
+    "version": "0.1.0",
+    "state": "research_specification"
+  },
+  {
+    "id": "smart-money-concepts",
+    "name": "Smart Money Concepts",
+    "owner": "graph",
+    "version": "0.1.0",
+    "state": "research_specification"
+  },
+  {
+    "id": "wyckoff-analysis",
+    "name": "Wyckoff Analysis",
+    "owner": "graph",
+    "version": "0.1.0",
+    "state": "research_specification"
+  },
+  {
+    "id": "multi-timeframe-analysis",
+    "name": "Multi-Timeframe Analysis",
+    "owner": "graph",
+    "version": "0.1.0",
+    "state": "research_specification"
+  },
+  {
+    "id": "volume-analysis",
+    "name": "Volume Analysis",
+    "owner": "graph",
+    "version": "0.1.0",
+    "state": "research_specification"
+  },
+  {
+    "id": "pattern-recognition",
+    "name": "Pattern Recognition",
+    "owner": "graph",
+    "version": "0.1.0",
+    "state": "research_specification"
+  },
+  {
+    "id": "liquidity-intelligence",
+    "name": "Liquidity Intelligence",
+    "owner": "graph",
+    "version": "0.1.0",
+    "state": "research_specification"
+  },
+  {
+    "id": "quantitative-analysis",
+    "name": "Quantitative Analysis",
+    "owner": "quant",
+    "version": "0.1.0",
+    "state": "research_specification"
+  },
+  {
+    "id": "market-regime",
+    "name": "Market Regime",
+    "owner": "quant",
+    "version": "0.1.0",
+    "state": "research_specification"
+  },
+  {
+    "id": "intermarket-analysis",
+    "name": "Intermarket Analysis",
+    "owner": "quant",
+    "version": "0.1.0",
+    "state": "research_specification"
+  },
+  {
+    "id": "session-intelligence",
+    "name": "Session Intelligence",
+    "owner": "quant",
+    "version": "0.1.0",
+    "state": "research_specification"
+  },
+  {
+    "id": "volatility-analysis",
+    "name": "Volatility Analysis",
+    "owner": "quant",
+    "version": "0.1.0",
+    "state": "research_specification"
+  },
+  {
+    "id": "backtesting",
+    "name": "Backtesting",
+    "owner": "quant",
+    "version": "0.1.0",
+    "state": "research_specification"
+  },
+  {
+    "id": "fundamental-analysis",
+    "name": "Fundamental Analysis",
+    "owner": "news",
+    "version": "0.1.0",
+    "state": "research_specification"
+  },
+  {
+    "id": "political-intelligence",
+    "name": "Political Intelligence",
+    "owner": "news",
+    "version": "0.1.0",
+    "state": "research_specification"
+  },
+  {
+    "id": "breaking-news-intelligence",
+    "name": "Breaking News Intelligence",
+    "owner": "news",
+    "version": "0.1.0",
+    "state": "research_specification"
+  },
+  {
+    "id": "geopolitical-analysis",
+    "name": "Geopolitical Analysis",
+    "owner": "news",
+    "version": "0.1.0",
+    "state": "research_specification"
+  },
+  {
+    "id": "macroeconomic-analysis",
+    "name": "Macroeconomic Analysis",
+    "owner": "news",
+    "version": "0.1.0",
+    "state": "research_specification"
+  },
+  {
+    "id": "central-bank-intelligence",
+    "name": "Central Bank Intelligence",
+    "owner": "news",
+    "version": "0.1.0",
+    "state": "research_specification"
+  },
+  {
+    "id": "economic-calendar",
+    "name": "Economic Calendar",
+    "owner": "news",
+    "version": "0.1.0",
+    "state": "research_specification"
+  },
+  {
+    "id": "news-sentiment-analysis",
+    "name": "News Sentiment Analysis",
+    "owner": "news",
+    "version": "0.1.0",
+    "state": "research_specification"
+  },
+  {
+    "id": "event-impact-analysis",
+    "name": "Event Impact Analysis",
+    "owner": "news",
+    "version": "0.1.0",
+    "state": "research_specification"
+  },
+  {
+    "id": "institutional-flow",
+    "name": "Institutional Flow",
+    "owner": "news",
+    "version": "0.1.0",
+    "state": "research_specification"
+  },
+  {
+    "id": "market-psychology",
+    "name": "Market Psychology",
+    "owner": "news",
+    "version": "0.1.0",
+    "state": "research_specification"
+  },
+  {
+    "id": "source-verification",
+    "name": "Source Verification",
+    "owner": "news",
+    "version": "0.1.0",
+    "state": "research_specification"
+  },
+  {
+    "id": "risk-management",
+    "name": "Risk Management",
+    "owner": "risk",
+    "version": "0.1.0",
+    "state": "research_specification"
+  }
+]

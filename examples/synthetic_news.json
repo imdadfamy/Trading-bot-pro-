@@ -1,0 +1,23 @@
+[
+  {
+    "source": "SYNTHETIC-TEST-ONLY",
+    "url": "https://example.org/synthetic-event",
+    "headline": "Synthetic critical event for replay tests",
+    "published_at": "2025-01-06T10:00:00+00:00",
+    "received_at": "2025-01-06T10:00:02+00:00",
+    "status": "unconfirmed",
+    "severity": "critical",
+    "assets": ["XAUUSD"]
+  },
+  {
+    "source": "SYNTHETIC-TEST-ONLY",
+    "url": "https://example.org/synthetic-event",
+    "headline": "Synthetic critical event for replay tests",
+    "published_at": "2025-01-06T10:00:00+00:00",
+    "received_at": "2025-01-06T10:20:00+00:00",
+    "verified_at": "2025-01-06T10:20:00+00:00",
+    "status": "retracted",
+    "severity": "critical",
+    "assets": ["XAUUSD"]
+  }
+]

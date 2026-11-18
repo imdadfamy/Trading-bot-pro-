@@ -1,0 +1,154 @@
+"""MT5 bridge. Never submits to an account unless its trade_mode is DEMO."""
+from math import isfinite
+from .core import Action, Signal, utcnow
+from .journal import Journal
+
+
+class DemoBroker:
+    """Offline test broker. Does not create real market fills."""
+    def preflight(self, signal, volume, quote):
+        return True
+
+    def send(self, signal, volume, quote):
+        return {"status": "simulated", "ticket": f"SIM-{signal.signal_id}"}
+
+
+class MT5DemoBroker:
+    def __init__(self, mt5, *, demo_execution_enabled=False):
+        self.mt5 = mt5
+        self.demo_execution_enabled = demo_execution_enabled
+
+    def _assert_demo(self, *, require_trading=True):
+        account = self.mt5.account_info()
+        if account is None or account.trade_mode != self.mt5.ACCOUNT_TRADE_MODE_DEMO:
+            raise RuntimeError("MT5 account must be confirmed DEMO")
+        terminal = self.mt5.terminal_info()
+        if terminal is None or not terminal.connected or (require_trading and not terminal.trade_allowed):
+            raise RuntimeError("Terminal unavailable for trading")
+        return account
+
+    def _request(self, signal, volume, quote):
+        mt5 = self.mt5
+        price = quote.ask if signal.action == Action.BUY else quote.bid
+        return {"action": mt5.TRADE_ACTION_DEAL, "symbol": signal.symbol,
+                "volume": volume, "type": mt5.ORDER_TYPE_BUY if signal.action == Action.BUY else mt5.ORDER_TYPE_SELL,
+                "price": price, "sl": signal.stop_loss, "tp": signal.take_profit,
+                "deviation": 10, "magic": 26001118, "comment": signal.signal_id[:31],
+                "type_time": mt5.ORDER_TIME_GTC, "type_filling": mt5.ORDER_FILLING_IOC}
+
+    def preflight(self, signal, volume, quote):
+        self._assert_demo()
+        info = self.mt5.symbol_info(signal.symbol)
+        tick = self.mt5.symbol_info_tick(signal.symbol)
+        if info is None or tick is None or not info.visible:
+            raise RuntimeError("Symbol or tick unavailable")
+        if abs(tick.ask - quote.ask) > info.point * 10 or abs(tick.bid - quote.bid) > info.point * 10:
+            raise RuntimeError("Broker quote moved; risk must be recalculated")
+        if volume < info.volume_min or volume > info.volume_max:
+            raise RuntimeError("Broker volume invalid")
+        result = self.mt5.order_check(self._request(signal, volume, quote))
+        if result is None or result.retcode != 0:
+            raise RuntimeError("MT5 order_check rejected")
+        return True
+
+    def send(self, signal, volume, quote):
+        if not self.demo_execution_enabled:
+            raise RuntimeError("MT5 demo execution is disabled by default")
+        self.preflight(signal, volume, quote)  # refresh account, tick and order_check immediately before send
+        result = self.mt5.order_send(self._request(signal, volume, quote))
+        if result is None:
+            raise RuntimeError("MT5 send outcome unknown; reconcile before retry")
+        if result.retcode == self.mt5.TRADE_RETCODE_DONE:
+            status = "accepted"
+        elif result.retcode == self.mt5.TRADE_RETCODE_DONE_PARTIAL:
+            status = "partial"
+        elif result.retcode == self.mt5.TRADE_RETCODE_REJECT:
+            status = "rejected"
+        else:
+            status = "uncertain"  # timeout, placed, requote, or unknown code: never retry
+        return {"status": status, "ticket": result.order or None,
+                "deal": getattr(result, "deal", None), "volume": getattr(result, "volume", None),
+                "retcode": result.retcode}
+
+    def inspect_ticket(self, signal: Signal, ticket: int, *, expected_account_login: int):
+        """Read-only broker observation. Absence of a record never proves no fill."""
+        account = self._assert_demo(require_trading=False)
+        if (not isinstance(expected_account_login, int) or isinstance(expected_account_login, bool)
+                or expected_account_login <= 0 or getattr(account, "login", None) != expected_account_login):
+            raise RuntimeError("MT5 demo account identity mismatch")
+        if not isinstance(ticket, int) or isinstance(ticket, bool) or ticket <= 0:
+            raise ValueError("A confirmed MT5 order ticket is required")
+        deals = self.mt5.history_deals_get(ticket=ticket)
+        orders = self.mt5.orders_get(ticket=ticket)
+        history = self.mt5.history_orders_get(ticket=ticket)
+        if any(records is None for records in (deals, orders, history)):
+            raise RuntimeError("Incomplete MT5 history; intent remains unresolved")
+        for record in (*deals, *orders, *history):
+            if record.symbol != signal.symbol or record.magic != 26001118:
+                raise RuntimeError("Broker record does not match expected symbol and magic")
+        for record in deals:
+            if record.order != ticket:
+                raise RuntimeError("Deal belongs to a different order")
+        for record in (*orders, *history):
+            if record.ticket != ticket:
+                raise RuntimeError("Order ticket mismatch")
+        if deals:
+            return {"status": "deals_observed", "ticket": ticket,
+                    "deal_tickets": [deal.ticket for deal in deals]}
+        if orders or history:
+            return {"status": "order_observed", "ticket": ticket, "deal_tickets": []}
+        return {"status": "unresolved", "ticket": ticket, "deal_tickets": []}
+
+
+def execute_demo(signal: Signal, decision, quote, broker, journal: Journal):
+    if signal.action == Action.WAIT or not decision.approved or signal.status != "validated":
+        raise ValueError("Only approved validated non-WAIT signals may be sent")
+    if (not isinstance(decision.volume, (int, float)) or isinstance(decision.volume, bool)
+            or not isfinite(decision.volume) or decision.volume <= 0):
+        raise ValueError("Approved volume must be positive and finite")
+    if (signal.expires_at.tzinfo is None or quote.observed_at.tzinfo is None
+            or signal.cycle_id != quote.cycle_id or signal.symbol != quote.symbol
+            or utcnow() >= signal.expires_at or not -1 <= (utcnow()-quote.observed_at).total_seconds() <= 5):
+        raise ValueError("Expired or mismatched execution snapshot")
+    if not journal.reserve(signal.signal_id, {"cycle_id": signal.cycle_id, "volume": decision.volume}):
+        raise RuntimeError("Intent already exists: reconcile broker before any retry")
+    journal.log("order.reserved", signal.signal_id, {"volume": decision.volume})
+    try:
+        if broker.preflight(signal, decision.volume, quote) is not True:
+            raise RuntimeError("Broker preflight did not approve")
+    except Exception as exc:
+        journal.transition_intent(signal.signal_id, {"reserved"}, "preflight_rejected", detail=str(exc))
+        journal.log("order.preflight_rejected", signal.signal_id, {"error": str(exc)})
+        raise
+    journal.transition_intent(signal.signal_id, {"reserved"}, "sending")
+    try:
+        result = broker.send(signal, decision.volume, quote)
+        if result["status"] not in {"accepted", "partial", "rejected", "uncertain", "simulated"}:
+            raise RuntimeError("Unrecognized broker response")
+        state = result["status"]
+        journal.transition_intent(signal.signal_id, {"sending"}, state,
+                                  ticket=result.get("ticket"), detail=str(result))
+        journal.log("order.result", signal.signal_id, result)
+        return result
+    except Exception as exc:
+        if journal.intent(signal.signal_id)["state"] == "sending":
+            journal.transition_intent(signal.signal_id, {"sending"}, "uncertain", detail=str(exc))
+        journal.log("order.uncertain", signal.signal_id, {"error": str(exc)})
+        raise
+
+
+def reconcile_demo_ticket(signal: Signal, broker: MT5DemoBroker, journal: Journal, *, expected_account_login: int):
+    """Confirm a known ticket only. Unknown outcomes require operator investigation."""
+    intent = journal.intent(signal.signal_id)
+    if intent is None or intent["state"] not in {"uncertain", "accepted", "partial", "order_observed"}:
+        raise RuntimeError("No reconcilable intent")
+    if not intent["broker_ticket"]:
+        raise RuntimeError("Unknown MT5 ticket: inspect the account manually; do not resend")
+    result = broker.inspect_ticket(signal, int(intent["broker_ticket"]),
+                                   expected_account_login=expected_account_login)
+    if result["status"] in {"unresolved", intent["state"]}:
+        return result
+    journal.transition_intent(signal.signal_id, {intent["state"]}, result["status"],
+                              ticket=result["ticket"], detail=str(result))
+    journal.log("order.reconciled", signal.signal_id, result)
+    return result

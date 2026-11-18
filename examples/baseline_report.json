@@ -1,0 +1,169 @@
+{
+  "config": {
+    "fast": 5,
+    "slow": 20,
+    "stop_distance": 3.0,
+    "reward_multiple": 2.0,
+    "starting_equity": 10000.0,
+    "risk_fraction": 0.005,
+    "point_value_per_lot": 100.0,
+    "commission_per_lot_round_trip": 7.0,
+    "slippage_price": 0.1,
+    "max_lot": 10.0,
+    "lot_step": 0.01,
+    "min_lot": 0.01
+  },
+  "metrics": {
+    "trades": 8,
+    "net_pnl": 775.3900000000122,
+    "win_rate": 1.0,
+    "profit_factor": null,
+    "expectancy_r": 1.8757370489981458,
+    "max_drawdown": 0.0,
+    "total_fees": 9.31,
+    "small_sample": true
+  },
+  "sessions": {
+    "London": {
+      "trades": 2,
+      "net_pnl": 186.5600000000029,
+      "win_rate": 1.0,
+      "profit_factor": null,
+      "expectancy_r": 1.8569792559009848,
+      "max_drawdown": 0.0,
+      "total_fees": 2.24,
+      "small_sample": true
+    },
+    "London/New York overlap": {
+      "trades": 1,
+      "net_pnl": 93.28000000000145,
+      "win_rate": 1.0,
+      "profit_factor": null,
+      "expectancy_r": 1.8314327898721734,
+      "max_drawdown": 0.0,
+      "total_fees": 1.12,
+      "small_sample": true
+    },
+    "New York": {
+      "trades": 3,
+      "net_pnl": 297.33000000000465,
+      "win_rate": 1.0,
+      "profit_factor": null,
+      "expectancy_r": 1.9099432122071949,
+      "max_drawdown": 0.0,
+      "total_fees": 3.5700000000000003,
+      "small_sample": true
+    },
+    "Tokyo": {
+      "trades": 2,
+      "net_pnl": 198.2200000000031,
+      "win_rate": 1.0,
+      "profit_factor": null,
+      "expectancy_r": 1.8653377268447193,
+      "max_drawdown": 0.0,
+      "total_fees": 2.3800000000000003,
+      "small_sample": true
+    }
+  },
+  "trades": [
+    {
+      "entered_at": "2025-01-06T10:00:00+00:00",
+      "closed_at": "2025-01-06T10:45:00+00:00",
+      "action": "SELL",
+      "entry": 2003.5783999999999,
+      "exit": 1997.6783999999998,
+      "lots": 0.16,
+      "pnl": 93.28000000000145,
+      "risk_cash": 50.0,
+      "fees": 1.12,
+      "session": "London"
+    },
+    {
+      "entered_at": "2025-01-06T12:15:00+00:00",
+      "closed_at": "2025-01-06T13:00:00+00:00",
+      "action": "BUY",
+      "entry": 1997.2093999999997,
+      "exit": 2003.1093999999998,
+      "lots": 0.16,
+      "pnl": 93.28000000000145,
+      "risk_cash": 50.46640000000001,
+      "fees": 1.12,
+      "session": "London"
+    },
+    {
+      "entered_at": "2025-01-06T14:40:00+00:00",
+      "closed_at": "2025-01-06T15:25:00+00:00",
+      "action": "SELL",
+      "entry": 2004.9968,
+      "exit": 1999.0967999999998,
+      "lots": 0.16,
+      "pnl": 93.28000000000145,
+      "risk_cash": 50.93280000000001,
+      "fees": 1.12,
+      "session": "London/New York overlap"
+    },
+    {
+      "entered_at": "2025-01-06T17:00:00+00:00",
+      "closed_at": "2025-01-06T17:45:00+00:00",
+      "action": "BUY",
+      "entry": 1998.579,
+      "exit": 2004.479,
+      "lots": 0.17,
+      "pnl": 99.11000000000155,
+      "risk_cash": 51.39920000000001,
+      "fees": 1.1900000000000002,
+      "session": "New York"
+    },
+    {
+      "entered_at": "2025-01-06T19:25:00+00:00",
+      "closed_at": "2025-01-06T20:10:00+00:00",
+      "action": "SELL",
+      "entry": 2005.8922,
+      "exit": 1999.9922,
+      "lots": 0.17,
+      "pnl": 99.11000000000155,
+      "risk_cash": 51.89475000000002,
+      "fees": 1.1900000000000002,
+      "session": "New York"
+    },
+    {
+      "entered_at": "2025-01-06T21:40:00+00:00",
+      "closed_at": "2025-01-06T22:25:00+00:00",
+      "action": "BUY",
+      "entry": 1999.4211999999998,
+      "exit": 2005.3211999999999,
+      "lots": 0.17,
+      "pnl": 99.11000000000155,
+      "risk_cash": 52.39030000000003,
+      "fees": 1.1900000000000002,
+      "session": "New York"
+    },
+    {
+      "entered_at": "2025-01-07T00:05:00+00:00",
+      "closed_at": "2025-01-07T00:50:00+00:00",
+      "action": "SELL",
+      "entry": 2007.3083000000001,
+      "exit": 2001.4083,
+      "lots": 0.17,
+      "pnl": 99.11000000000155,
+      "risk_cash": 52.88585000000005,
+      "fees": 1.1900000000000002,
+      "session": "Tokyo"
+    },
+    {
+      "entered_at": "2025-01-07T02:25:00+00:00",
+      "closed_at": "2025-01-07T03:10:00+00:00",
+      "action": "BUY",
+      "entry": 2000.7887,
+      "exit": 2006.6887000000002,
+      "lots": 0.17,
+      "pnl": 99.11000000000155,
+      "risk_cash": 53.381400000000056,
+      "fees": 1.1900000000000002,
+      "session": "Tokyo"
+    }
+  ],
+  "open_position_at_end": false,
+  "candles": 240,
+  "warning": "Research baseline; illustrative contract metadata and unverified historical feed"
+}

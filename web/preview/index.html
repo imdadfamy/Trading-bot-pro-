@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TRADING INTELLIGENCE PRO · Observation locale</title>
+  <link rel="stylesheet" href="/preview.css">
+  <script src="/preview.js" defer></script>
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="brand"><span class="brand-icon">◈</span><span>TRADING<br>INTELLIGENCE <em>PRO</em></span></div>
+      <p class="side-label">PLATEFORME DE RECHERCHE</p>
+      <nav id="navigation" aria-label="Navigation principale"></nav>
+      <div class="side-bottom"><span class="danger-dot">●</span> ARRÊT DES ENTRÉES ACTIF<br><small>Compte réel interdit</small></div>
+    </aside>
+    <main>
+      <header class="topbar">
+        <span id="breadcrumb">PLATEFORME / COMMAND CENTER</span>
+        <div class="top-actions"><span class="mode">● OBSERVATION</span><button id="stop-open" class="danger">ARRÊT D’URGENCE</button></div>
+      </header>
+      <div class="content">
+        <div class="heading"><div><p class="kicker">RESEARCH SYSTEM / XAUUSD</p><h1 id="title">Command Center</h1><p id="subtitle">Surveillance locale, sans flux live ni ordre réel.</p></div><span class="demo">DÉMO NON CONNECTÉE</span></div>
+        <div id="notice" role="status" aria-live="polite"></div>
+        <div id="content" aria-live="polite"></div>
+        <footer>TRADING INTELLIGENCE PRO · ENVIRONNEMENT LOCAL DE RECHERCHE · DONNÉES SYNTHÉTIQUES POSSIBLES</footer>
+      </div>
+    </main>
+  </div>
+  <dialog id="stop-dialog" aria-labelledby="stop-title">
+    <h2 id="stop-title">Arrêt des nouvelles entrées</h2>
+    <p>La demande est enregistrée dans l’API locale. La liaison au worker MT5 n’est pas encore en service.</p>
+    <label>Clé opérateur<input id="stop-key" type="password" autocomplete="off"></label>
+    <p id="stop-message" role="status"></p>
+    <div class="dialog-actions"><button id="stop-close">Fermer</button><button id="stop-confirm" class="danger">Activer l’arrêt</button></div>
+  </dialog>
+</body>
+</html>
