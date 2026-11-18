@@ -4,6 +4,10 @@
 
 CSV horodaté → validation OHLC → stockage SQLite → cycle immuable → quatre rapports → directeur → signal WAIT → journal. Le backtest est séparé du cycle décisionnel et de MT5. Un `DemoBroker` simule uniquement un résultat logiciel ; ce n'est pas un courtier. Le pont MT5 n'est exposé par aucune route et n'est pas activé.
 
+## Famille synthétique (hors ligne)
+
+Les indices synthétiques ne partagent pas les preuves de XAUUSD : ni annonces, ni sessions forex, ni fondamentaux. `synthetic_research.describe` lit des bougies closes d'un seul courtier et d'un seul symbole et produit des statistiques descriptives (dispersion, fréquence de mouvements extrêmes, intervalle de Wilson indicatif, découpage chronologique 80/20). La sortie est toujours `WAIT` : elle n'alimente ni le directeur, ni le risque, ni MT5.
+
 ## Frontières
 
 - Données externes : non fiables ; le normaliseur conserve source, URL, publication, réception et validation. Une rumeur critique suspend une entrée, sans produire seule une direction.

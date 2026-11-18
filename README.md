@@ -28,6 +28,7 @@ python -m trading_pro.cli --database data/trading.db import-news ..\examples\syn
 python -m trading_pro.cli --database data/trading.db cycle ..\examples\synthetic_xauusd.csv
 python -m trading_pro.cli --database data/trading.db backtest ..\examples\synthetic_xauusd.csv
 python -m trading_pro.cli --database data/trading.db evaluate ..\examples\synthetic_xauusd.csv
+python -m trading_pro.cli analyze-synthetic ..\examples\synthetic_xauusd.csv --family other   # statistiques descriptives hors ligne, voir docs/INDICES_SYNTHETIQUES.md
 python -m trading_pro.cli --database data/trading.db backup data/trading-backup.db
 python -m trading_pro.cli verify-backup data/trading-backup.db
 $env:TIP_OPERATOR_KEY = 'une-cle-locale-longue-a-generer'
@@ -64,7 +65,7 @@ npm run build
 
 La démonstration hors ligne `DemoBroker` simule des réponses ; elle n'est pas un compte démo MT5. `MT5DemoBroker` vérifie le mode DEMO avant preflight et immédiatement avant envoi, mais n'est pas activé par l'API. Un signal WAIT, non validé ou expiré ne déclenche aucun envoi. Les intentions d'ordre sont réservées en SQLite ; tout timeout passe à l'état `uncertain` et exige une réconciliation manuelle ou automatique avant une nouvelle tentative. Ne fournir aucun secret au navigateur ni aux agents.
 
-Les pages de l'interface lisent les résultats locaux mais ne constituent pas encore des modules de production. Aucun fournisseur d'actualités, de données live ou de modèles IA n'est connecté ; aucune période expérimentale de 14 jours n'a démarré. Les seuils initiaux nécessitent validation sur le contrat du courtier. Les jeux d'exemple sont **synthétiques** et leurs profits simulés ne prédisent aucun résultat. Voir [avancement](docs/AVANCEMENT.md), [architecture](docs/ARCHITECTURE.md), [intégrations](docs/INTEGRATIONS.md) et [runbook](docs/RUNBOOK.md).
+Les pages de l'interface lisent les résultats locaux mais ne constituent pas encore des modules de production. Aucun fournisseur d'actualités, de données live ou de modèles IA n'est connecté ; aucune période expérimentale de 14 jours n'a démarré. Les seuils initiaux nécessitent validation sur le contrat du courtier. Les jeux d'exemple sont **synthétiques** et leurs profits simulés ne prédisent aucun résultat. Les indices synthétiques (Volatility, Boom/Crash, Step, Jump, Range Break) sont une famille distincte de XAUUSD, étudiée hors ligne seulement : voir [indices synthétiques](docs/INDICES_SYNTHETIQUES.md). Voir [avancement](docs/AVANCEMENT.md), [architecture](docs/ARCHITECTURE.md), [intégrations](docs/INTEGRATIONS.md) et [runbook](docs/RUNBOOK.md).
 
 ## Déploiement prévu
 

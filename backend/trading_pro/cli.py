@@ -27,6 +27,11 @@ def main():
     provider_news = sub.add_parser("poll-newsapi", help="One explicit fetch; no trading or background worker")
     provider_news.add_argument("--query", default='"gold" OR "XAUUSD"', help="Search expression, not a trading signal")
     sub.add_parser("poll-calendar", help="One explicit Trading Economics calendar snapshot; no trading")
+    synthetic = sub.add_parser("analyze-synthetic", help="Offline descriptive statistics only; no orders")
+    synthetic.add_argument("csv", help="Closed candles from one broker and one synthetic symbol")
+    synthetic.add_argument("--family", required=True,
+                           choices=("volatility", "boom", "crash", "step", "range_break", "jump", "other"))
+    synthetic.add_argument("--jump-threshold-pct", type=float, default=1.0)
     backtest = sub.add_parser("backtest")
     backtest.add_argument("csv")
     backtest.add_argument("--report", help="Optional JSON output path")
@@ -46,6 +51,12 @@ def main():
     args = parser.parse_args()
     if args.command == "verify-backup":
         result = verify_backup(args.path)
+        print(json.dumps(result, indent=2))
+        return
+    if args.command == "analyze-synthetic":
+        from .synthetic_research import describe
+        result = describe(load_candles(args.csv), family=args.family,
+                          jump_threshold_pct=args.jump_threshold_pct)
         print(json.dumps(result, indent=2))
         return
     store = ResearchStore(args.database)
