@@ -93,7 +93,7 @@ async function generic(page,sequence) {
     const studies=await get("/synthetic/reports").catch(()=>[]);if(sequence!==renderSequence)return;
     append(content,info("Indices synthétiques : statistiques descriptives hors ligne. Elles ne prédisent rien, ne produisent aucun signal et ne sont reliées à aucun ordre.",true));
     const study=card("Études d'indices synthétiques");if(!studies.length)append(study,empty("Aucune étude enregistrée (commande analyze-synthetic --save)"));
-    else studies.forEach(item=>{const r=item.report||{};append(study,row([`${item.symbol} · ${item.family}`,`${value(r.all?.observations)} bougies · sauts ${value(r.all?.absolute_jump_count)} (${value(r.all?.absolute_jump_frequency===null||r.all?.absolute_jump_frequency===undefined?null:Math.round(r.all.absolute_jump_frequency*10000)/100)} %)`,r.statistically_sufficient?"ÉCHANTILLON SUFFISANT":"ÉCHANTILLON INSUFFISANT"]));});
+    else studies.forEach(item=>{const r=item.report||{};append(study,row([`${item.symbol} · ${item.family}`,`${value(r.all?.observations)} bougies · sauts ${value(r.all?.absolute_jump_count)} (hausse ${value(r.all?.up_jump_count)} / baisse ${value(r.all?.down_jump_count)},${value(r.all?.absolute_jump_frequency===null||r.all?.absolute_jump_frequency===undefined?null:Math.round(r.all.absolute_jump_frequency*10000)/100)} %)`,r.statistically_sufficient?"ÉCHANTILLON SUFFISANT":"ÉCHANTILLON INSUFFISANT"]));});
     append(content,study);
   }
   if(page==="Session Analytics") {const panel=card("Sessions indicatives");labeled(panel,{session_principale:data.primary,sessions_actives:data.active,horaires_courtier_vérifiés:data.broker_hours_verified,horodatage_utc:data.as_of});append(content,panel);}

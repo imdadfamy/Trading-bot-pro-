@@ -48,6 +48,12 @@ class SyntheticResearchTests(unittest.TestCase):
                          spike.ask, spike.broker)
         report = describe(data, family="jump", jump_threshold_pct=1.0)
         self.assertGreaterEqual(report["all"]["absolute_jump_count"], 1)
+        whole = report["all"]
+        self.assertGreaterEqual(whole["up_jump_count"], 1)   # the spike itself
+        self.assertGreaterEqual(whole["down_jump_count"], 1)  # the return to the previous level
+        self.assertEqual(whole["up_jump_count"] + whole["down_jump_count"], whole["absolute_jump_count"])
+        self.assertGreater(whole["largest_up_move_pct"], 1.0)
+        self.assertLess(whole["largest_down_move_pct"], -1.0)
         self.assertEqual(report["action"], "WAIT")
         overlapping = candles(3)
         overlapping[1] = Candle(overlapping[1].symbol, overlapping[0].opened_at,

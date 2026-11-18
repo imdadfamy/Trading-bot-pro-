@@ -41,15 +41,25 @@ def describe(candles: list[Candle], *, family: str, jump_threshold_pct: float = 
 
     def segment(values: list[float]) -> dict:
         n = len(values)
-        jumps = sum(abs(expm1(r)) >= threshold for r in values)
+        up = sum(expm1(r) >= threshold for r in values)
+        down = sum(expm1(r) <= -threshold for r in values)
+        jumps = up + down
         return {
             "observations": n,
             "median_return_pct": 100 * median(values) if n else None,
             "return_std_pct_per_bar": 100 * pstdev(values) if n > 1 else None,
             "mean_absolute_return_pct": 100 * mean(abs(r) for r in values) if n else None,
+            "largest_up_move_pct": 100 * expm1(max(values)) if n else None,
+            "largest_down_move_pct": 100 * expm1(min(values)) if n else None,
             "absolute_jump_count": jumps,
             "absolute_jump_frequency": jumps / n if n else None,
             "jump_frequency_wilson_95": _wilson(jumps, n),
+            "up_jump_count": up,
+            "up_jump_frequency": up / n if n else None,
+            "up_jump_wilson_95": _wilson(up, n),
+            "down_jump_count": down,
+            "down_jump_frequency": down / n if n else None,
+            "down_jump_wilson_95": _wilson(down, n),
         }
 
     split = max(1, int(len(returns) * .8))
