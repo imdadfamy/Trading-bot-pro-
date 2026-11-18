@@ -90,6 +90,11 @@ async function generic(page,sequence) {
     append(content,info("Les chiffres de l’exemple synthétique ne mesurent aucune performance de marché.",true));
     const panel=card("Backtests locaux"); if(!data.length)append(panel,empty("Aucun backtest enregistré"));
     else data.forEach(item=>append(panel,row([item.dataset,`${value(item.result?.metrics?.trades)} trades`,"RECHERCHE UNIQUEMENT"])));append(content,panel);
+    const studies=await get("/synthetic/reports").catch(()=>[]);if(sequence!==renderSequence)return;
+    append(content,info("Indices synthétiques : statistiques descriptives hors ligne. Elles ne prédisent rien, ne produisent aucun signal et ne sont reliées à aucun ordre.",true));
+    const study=card("Études d'indices synthétiques");if(!studies.length)append(study,empty("Aucune étude enregistrée (commande analyze-synthetic --save)"));
+    else studies.forEach(item=>{const r=item.report||{};append(study,row([`${item.symbol} · ${item.family}`,`${value(r.all?.observations)} bougies · sauts ${value(r.all?.absolute_jump_count)} (${value(r.all?.absolute_jump_frequency===null||r.all?.absolute_jump_frequency===undefined?null:Math.round(r.all.absolute_jump_frequency*10000)/100)} %)`,r.statistically_sufficient?"ÉCHANTILLON SUFFISANT":"ÉCHANTILLON INSUFFISANT"]));});
+    append(content,study);
   }
   if(page==="Session Analytics") {const panel=card("Sessions indicatives");labeled(panel,{session_principale:data.primary,sessions_actives:data.active,horaires_courtier_vérifiés:data.broker_hours_verified,horodatage_utc:data.as_of});append(content,panel);}
   if(page==="Budget Center") {const panel=card("Coûts IA enregistrés");labeled(panel,{dépense_totale_usd:data.total_usd,dépense_du_jour_usd:data.today_usd,plafond_quotidien_usd:data.daily_limit_usd,plafond_expérience_usd:data.experiment_limit_usd,appels:data.calls,nouveaux_appels_bloqués:data.new_model_calls_blocked});append(content,panel);}

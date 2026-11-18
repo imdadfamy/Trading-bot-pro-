@@ -9,6 +9,7 @@ Exécuter `python -m trading_pro.server` depuis `backend` pour une API sans dép
 | GET | `/signals`, `/agents`, `/skills` | Décisions et catalogue | Local |
 | GET | `/positions`, `/performance` | État indisponible sans MT5 | Local |
 | GET | `/costs`, `/backtests`, `/experiments`, `/memory`, `/alerts` | Mesures et historique | Local |
+| GET | `/synthetic/reports` | Études descriptives d'indices synthétiques enregistrées avec `analyze-synthetic --save` ; lecture seule, toujours `WAIT` | Local |
 | GET | `/settings`, `/audit`, `/audit/integrity` | Paramètres versionnés, journal et vérification de sa chaîne | Clé opérateur |
 | GET | `/export/signals.csv` | Export CSV du journal des signaux, cellules sécurisées | Clé opérateur |
 | GET | `/orders/intents` | Intentions d'ordre à examiner ou à rapprocher ; lecture seule | Clé opérateur |

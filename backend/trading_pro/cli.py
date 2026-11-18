@@ -32,6 +32,8 @@ def main():
     synthetic.add_argument("--family", required=True,
                            choices=("volatility", "boom", "crash", "step", "range_break", "jump", "other"))
     synthetic.add_argument("--jump-threshold-pct", type=float, default=1.0)
+    synthetic.add_argument("--save", action="store_true",
+                           help="Store the report in the local database (--database) for the dashboard")
     deriv = sub.add_parser("fetch-deriv-candles",
                            help="One explicit public, unauthenticated Deriv history request saved to CSV; no trading")
     deriv.add_argument("symbol", help="Deriv symbol such as R_75, BOOM500, CRASH500, stpRNG")
@@ -73,6 +75,8 @@ def main():
         from .synthetic_research import describe
         result = describe(load_candles(args.csv), family=args.family,
                           jump_threshold_pct=args.jump_threshold_pct)
+        if args.save:
+            result["saved_report_id"] = ResearchStore(args.database).synthetic_report(result)
         print(json.dumps(result, indent=2))
         return
     store = ResearchStore(args.database)

@@ -115,6 +115,8 @@ class Service:
             return {"metrics": None, "reason": "No validated demo fills or equity snapshots"}
         if path == "/backtests":
             return self.store.backtests()
+        if path == "/synthetic/reports":
+            return self.store.synthetic_reports()
         if path == "/experiments":
             from .experiments import ExperimentManager
             return ExperimentManager(self.store).list()

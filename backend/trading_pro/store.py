@@ -58,6 +58,9 @@ class ResearchStore:
             CREATE TABLE IF NOT EXISTS memory (
               id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, cycle_id TEXT,
               cause TEXT NOT NULL, evidence TEXT NOT NULL, recommendation TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS synthetic_reports (
+              id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, family TEXT NOT NULL,
+              broker TEXT NOT NULL, symbol TEXT NOT NULL, report TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS alerts (
               id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, kind TEXT NOT NULL,
               message TEXT NOT NULL, acknowledged_at TEXT);
@@ -193,6 +196,24 @@ class ResearchStore:
         with self.journal.connect() as db:
             return [{**dict(row), "result": json.loads(row["result"])} for row in db.execute(
                 "SELECT * FROM backtests ORDER BY id DESC LIMIT ?", (min(limit, 100),))]
+
+    def synthetic_report(self, report: dict) -> int:
+        """Persist one offline descriptive study; it never feeds the director or any order path."""
+        if report.get("action") != "WAIT" or report.get("mode") != "observation":
+            raise ValueError("Only observation-mode WAIT reports can be stored")
+        with self.journal.connect() as db:
+            identifier = db.execute(
+                "INSERT INTO synthetic_reports(at,family,broker,symbol,report) VALUES(?,?,?,?,?)",
+                (datetime.now(timezone.utc).isoformat(), report["family"], report["broker"],
+                 report["symbol"], json.dumps(report))).lastrowid
+        self.journal.log("synthetic.reported", str(identifier), {"family": report["family"],
+                                                               "symbol": report["symbol"]})
+        return identifier
+
+    def synthetic_reports(self, limit=20):
+        with self.journal.connect() as db:
+            return [{**dict(row), "report": json.loads(row["report"])} for row in db.execute(
+                "SELECT * FROM synthetic_reports ORDER BY id DESC LIMIT ?", (min(max(limit, 0), 100),))]
 
     def remember(self, *, cause: str, evidence: str, recommendation: str, cycle_id: str | None = None):
         if not all(isinstance(value, str) and 1 <= len(value) <= 2000 for value in (cause, evidence, recommendation)):

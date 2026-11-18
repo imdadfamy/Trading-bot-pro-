@@ -49,11 +49,17 @@ function tiles(row: Row, keys: string[]) {
 }
 export default function ModuleView({ page }: { page: string }) {
   const [value, setValue] = useState<unknown>(null);
+  const [studies, setStudies] = useState<unknown[]>([]);
   const [error, setError] = useState(false);
   const [loading, setLoading] = useState(true);
   useEffect(() => {
     const controller = new AbortController();
-    setLoading(true); setError(false);setValue(null);
+    setLoading(true); setError(false);setValue(null);setStudies([]);
+    if (page === "Strategy Lab") {
+      fetch(base + "/synthetic/reports", { cache: "no-store", signal: controller.signal })
+        .then(r => (r.ok ? r.json() : [])).then(result => { if (!controller.signal.aborted && Array.isArray(result)) setStudies(result); })
+        .catch(() => undefined);
+    }
     fetch(base + (endpoint[page] ?? "/health"), { cache: "no-store", signal: controller.signal })
       .then(r => { if (!r.ok) throw new Error("Unavailable"); return r.json(); })
       .then(result => { if (!controller.signal.aborted) setValue(result); })
@@ -71,6 +77,7 @@ export default function ModuleView({ page }: { page: string }) {
       {page === "Market Intelligence" && <><p>Sources horodatées et statuts de vérification. Aucun flux externe n’est connecté.</p><div className="items">{list.length ? list.map((entry,i) => {const r=isRow(entry)?entry:{};return <div className="item" key={i}><strong>{show(r.headline)}</strong><span>{show(r.status)} · {show(r.severity)}</span></div>;}) : <div className="empty-small">Aucun événement reçu</div>}</div></>}
       {page === "Trading Terminal" && <><p>Journal des signaux de recherche. Exécution MT5 désactivée.</p><div className="items">{list.length ? list.slice(0,30).map((entry,i) => {const r=isRow(entry)?entry:{};return <div className="item" key={i}><strong>{show(r.action)}</strong><span>{show(r.symbol)} · {show(r.status)}</span><span>{show(r.rationale)}</span></div>;}) : <div className="empty-small">Aucun signal</div>}</div></>}
       {page === "Strategy Lab" && <><p>Backtests locaux distincts des performances réelles. Le jeu fourni est synthétique.</p><div className="items">{list.length ? list.map((entry,i) => {const r=isRow(entry)?entry:{}; const result=isRow(r.result)?r.result:{}; const metrics=isRow(result.metrics)?result.metrics:{};return <div className="item" key={i}><strong>{show(r.dataset)}</strong><span>{show(metrics.trades)} trades · P&L {show(metrics.net_pnl)} USD</span><em>RECHERCHE</em></div>;}) : <div className="empty-small">Aucun backtest enregistré</div>}</div></>}
+      {page === "Strategy Lab" && <><p>Indices synthétiques : statistiques descriptives hors ligne, sans signal ni lien avec les ordres.</p><div className="items">{studies.length ? studies.map((entry, i) => { const r = isRow(entry) ? entry : {}; const rep = isRow(r.report) ? r.report : {}; const all = isRow(rep.all) ? rep.all : {}; const freq = typeof all.absolute_jump_frequency === "number" ? `${(all.absolute_jump_frequency * 100).toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} %` : "—"; return <div className="item" key={i}><strong>{show(r.symbol)} · {show(r.family)}</strong><span>{show(all.observations)} bougies · sauts {show(all.absolute_jump_count)} ({freq})</span><em>{rep.statistically_sufficient ? "ÉCHANTILLON SUFFISANT" : "ÉCHANTILLON INSUFFISANT"}</em></div>; }) : <div className="empty-small">Aucune étude enregistrée (analyze-synthetic --save)</div>}</div></>}
       {page === "AI Memory" && <><p>Causes, preuves et recommandations versionnées. Aucune modification automatique de stratégie.</p><div className="items">{list.length ? list.map((entry,i)=>{const r=isRow(entry)?entry:{};return <div className="item" key={i}><strong>{show(r.cause)}</strong><span>{show(r.recommendation)}</span></div>;}) : <div className="empty-small">Aucune observation enregistrée</div>}</div></>}
       {page === "Session Analytics" && isRow(value) && <><p>Sessions indicatives, indépendantes des horaires du courtier.</p>{tiles(value,["as_of","active","primary","broker_hours_verified"])}</>}
       {page === "Budget Center" && isRow(value) && <><p>Coûts IA enregistrés ; le budget expérimental est bloquant dans l’adaptateur.</p>{tiles(value,["total_usd","today_usd","daily_limit_usd","experiment_limit_usd","calls","new_model_calls_blocked"])}</>}

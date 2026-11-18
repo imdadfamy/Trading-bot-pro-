@@ -1,7 +1,10 @@
+import tempfile
 import unittest
+from pathlib import Path
 from datetime import datetime, timedelta, timezone
 
 from trading_pro.market import Candle
+from trading_pro.service import Service
 from trading_pro.synthetic_research import describe
 
 
@@ -54,6 +57,20 @@ class SyntheticResearchTests(unittest.TestCase):
             describe(overlapping, family="other")
         with self.assertRaises(ValueError):
             describe(data, family="not-a-family")
+
+    def test_reports_are_stored_read_only_and_exposed_by_the_service(self):
+        report = describe(candles(), family="volatility")
+        with tempfile.TemporaryDirectory() as folder:
+            service = Service(str(Path(folder) / "t.db"))
+            self.assertEqual(service.read("/synthetic/reports"), [])
+            identifier = service.store.synthetic_report(report)
+            rows = service.read("/synthetic/reports")
+            self.assertEqual(rows[0]["id"], identifier)
+            self.assertEqual(rows[0]["report"]["action"], "WAIT")
+            self.assertEqual(rows[0]["symbol"], "Volatility 75 Index")
+            self.assertTrue(service.store.journal.verify_audit())
+            with self.assertRaises(ValueError):
+                service.store.synthetic_report({**report, "action": "BUY"})
 
 
 if __name__ == "__main__":
