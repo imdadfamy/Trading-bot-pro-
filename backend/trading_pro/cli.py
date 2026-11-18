@@ -129,6 +129,12 @@ def main():
     fm.add_argument("--server-utc-offset-hours", type=float, default=None,
                     help="Broker clock offset to UTC; measured from a fresh tick when omitted")
     fm.add_argument("--terminal-path", default=None)
+    dry = sub.add_parser("mt5-dry-run",
+                         help="Ask the MT5 demo broker to CHECK a minimal order (order_check): nothing is executed")
+    dry.add_argument("symbol", help="Exact MT5 symbol, for example XAUUSD or 'Boom 500 Index'")
+    dry.add_argument("--side", choices=("BUY", "SELL", "both"), default="both")
+    dry.add_argument("--select", action="store_true", help="Add the symbol to Market Watch if it is not there")
+    dry.add_argument("--terminal-path", default=None)
     models = sub.add_parser("analyze-with-models",
                             help="One explicit model-assisted cycle: paid provider calls, budget capped, no orders")
     models.add_argument("csv", help="Closed candles, same format as the cycle command")
@@ -203,6 +209,23 @@ def main():
             refresh_module.save(path, updated)
         print(json.dumps({"written": not args.dry_run, "changes": summary, **notes,
                           "coverage": us_events.parse(updated).coverage(datetime.now(timezone.utc))}, indent=2))
+        return
+    if args.command == "mt5-dry-run":
+        from . import mt5_dryrun, mt5_status
+        try:
+            import MetaTrader5 as terminal_module
+        except ImportError:
+            parser.error("Package MetaTrader5 missing: python -m pip install MetaTrader5==5.0.6231")
+        try:
+            login, server, password = mt5_status.credentials_from_env()
+            default_path = str(mt5_status.DEFAULT_TERMINAL) if mt5_status.DEFAULT_TERMINAL.is_file() else None
+            report = mt5_dryrun.dry_run(terminal_module, symbol=args.symbol,
+                                        sides=("BUY", "SELL") if args.side == "both" else (args.side,),
+                                        expected_login=login, server=server, password=password,
+                                        terminal_path=args.terminal_path or default_path, select=args.select)
+        except RuntimeError as exc:
+            parser.error(str(exc))
+        print(json.dumps(report, indent=2, ensure_ascii=False))
         return
     if args.command == "fetch-mt5-candles":
         from . import mt5_history, mt5_status

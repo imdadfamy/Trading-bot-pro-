@@ -46,9 +46,11 @@ class MT5DemoBroker:
                 "deviation": 10, "magic": 26001118, "comment": signal.signal_id[:31],
                 "type_time": mt5.ORDER_TIME_GTC, "type_filling": filling}
 
-    def _checked_request(self, signal, volume, quote):
+    last_check = None  # raw order_check answer of the latest validation, for diagnostics
+
+    def _checked_request(self, signal, volume, quote, *, require_trading=True):
         """Validate against the live contract, then ask the broker to check the exact request."""
-        self._assert_demo()
+        self._assert_demo(require_trading=require_trading)
         info = self.mt5.symbol_info(signal.symbol)
         tick = self.mt5.symbol_info_tick(signal.symbol)
         if info is None or tick is None or not info.visible:
@@ -65,13 +67,19 @@ class MT5DemoBroker:
             if steps != steps.to_integral_value():
                 raise RuntimeError("Volume is not a multiple of the broker volume step")
         level = getattr(info, "trade_stops_level", 0) or 0
-        price = tick.ask if signal.action == Action.BUY else tick.bid
-        minimum = level * info.point
-        for stop in (signal.stop_loss, signal.take_profit):
-            if stop is not None and abs(price - stop) < minimum:
-                raise RuntimeError("Stop or target closer than the broker minimum distance")
+        minimum = Decimal(str(level)) * Decimal(str(info.point))
+        # Stops are measured from the price at which the position would be CLOSED: the bid for a long, the ask
+        # for a short. Measured from the entry price, the stop-loss would need the spread on top (verified with
+        # order_check on the demo account).
+        close_at = Decimal(str(tick.bid if signal.action == Action.BUY else tick.ask))
+        sign = 1 if signal.action == Action.BUY else -1
+        if signal.stop_loss is not None and sign * (close_at - Decimal(str(signal.stop_loss))) < minimum:
+            raise RuntimeError("Stop closer than the broker minimum distance")
+        if signal.take_profit is not None and sign * (Decimal(str(signal.take_profit)) - close_at) < minimum:
+            raise RuntimeError("Target closer than the broker minimum distance")
         request = self._request(signal, volume, quote, self._filling(info))
         result = self.mt5.order_check(request)
+        self.last_check = result
         if result is None or result.retcode != 0:
             raise RuntimeError("MT5 order_check rejected")
         return request

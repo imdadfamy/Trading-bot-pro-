@@ -85,3 +85,13 @@ python -m trading_pro.cli backtest data\v75_m5.csv --stop-from-range 2.5 --point
 ```
 
 `--stop-from-range 2.5` règle le stop à 2,5 fois la hauteur médiane d'une bougie, ce qui adapte la règle à l'échelle de l'instrument. `--price-basis auto` (défaut) détecte les bougies construites sur le prix vendeur, comme celles du terminal MetaTrader, et applique alors le coût complet de l'écart.
+
+## Essai d'ordre à blanc (le courtier valide, rien n'est exécuté)
+
+```powershell
+Set-Location -LiteralPath 'C:\Users\imdad\TRADING bot pro\backend'
+python -m trading_pro.cli mt5-dry-run XAUUSD
+python -m trading_pro.cli mt5-dry-run "Boom 500 Index" --side SELL
+```
+
+La commande demande au courtier de **vérifier** (`order_check`) un ordre minimal : plus petit volume autorisé, stops à deux fois la distance minimale, achat et vente. Elle n'ajoute que `order_check` à la liste blanche de fonctions ; `order_send` et toute autre fonction de trading restent inaccessibles. Elle fonctionne avec « Trading algo » éteint. Le rapport indique le code du courtier, sa signification et la marge requise.

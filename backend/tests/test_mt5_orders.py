@@ -82,12 +82,17 @@ class FillModeAndContractTests(unittest.TestCase):
         self.assertTrue(broker.preflight(signal, 0.37, quote))
         with self.assertRaisesRegex(RuntimeError, "volume step"):
             broker.preflight(signal, 0.015, quote)
-        too_close_stop, _ = make(stop=2000.0)  # 0.18 from the ask, below 20 points (0.20)
-        with self.assertRaisesRegex(RuntimeError, "minimum distance"):
-            broker.preflight(too_close_stop, 0.01, quote)
-        too_close_target, _ = make(take=2000.3)
-        with self.assertRaisesRegex(RuntimeError, "minimum distance"):
-            broker.preflight(too_close_target, 0.01, quote)
+        # Stops are measured from the closing price (bid 2000.00 for a long, ask 2000.18 for a short), minimum 0.20.
+        accepted_edge, _ = make(stop=1999.80, take=2000.20)
+        self.assertTrue(broker.preflight(accepted_edge, 0.01, quote))
+        for kwargs in ({"stop": 1999.81}, {"take": 2000.19}, {"stop": 2000.0}):
+            with self.assertRaisesRegex(RuntimeError, "minimum distance"):
+                broker.preflight(make(**kwargs)[0], 0.01, quote)
+        sell_ok, sell_quote = make(Action.SELL, stop=2000.38, take=1999.98)
+        self.assertTrue(broker.preflight(sell_ok, 0.01, sell_quote))
+        for kwargs in ({"stop": 2000.37}, {"take": 1999.99}):
+            with self.assertRaisesRegex(RuntimeError, "minimum distance"):
+                broker.preflight(make(Action.SELL, **{"stop": 2001.0, "take": 1997.0, **kwargs})[0], 0.01, sell_quote)
         sell, sell_quote = make(Action.SELL, stop=2001.0, take=1997.0)
         self.assertTrue(broker.preflight(sell, 0.01, sell_quote))
         with self.assertRaisesRegex(RuntimeError, "volume invalid"):

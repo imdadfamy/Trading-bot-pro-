@@ -24,11 +24,12 @@ FILLING_BITS = ((1, "FOK"), (2, "IOC"))
 class ReadOnlyMT5:
     """Expose a fixed set of read functions of the MetaTrader5 module and nothing else."""
 
-    def __init__(self, module):
+    def __init__(self, module, allowed=ALLOWED):
         self._module = module
+        self._allowed = frozenset(allowed)
 
     def __getattr__(self, name):
-        if name.startswith("_") or name not in ALLOWED:
+        if name.startswith("_") or name not in self._allowed:
             if name.isupper():  # constants are harmless
                 return getattr(self._module, name)
             raise PermissionError(f"MT5 function '{name}' is not allowed in read-only inspection")
