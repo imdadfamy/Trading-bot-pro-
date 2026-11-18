@@ -118,17 +118,19 @@ class MT5DemoBroker:
             raise RuntimeError("MT5 demo account identity mismatch")
         if not isinstance(ticket, int) or isinstance(ticket, bool) or ticket <= 0:
             raise ValueError("A confirmed MT5 order ticket is required")
-        deals = self.mt5.history_deals_get(ticket=ticket)
+        # history_deals_get(ticket=...) takes a DEAL ticket and answers "Invalid params" for an order ticket
+        # (observed on the real terminal). A market order opens the position whose id equals the order ticket,
+        # so the deals are read by position and then narrowed to the ones that belong to this very order
+        # (the closing deal of the same position belongs to another order).
+        position_deals = self.mt5.history_deals_get(position=ticket)
         orders = self.mt5.orders_get(ticket=ticket)
         history = self.mt5.history_orders_get(ticket=ticket)
-        if any(records is None for records in (deals, orders, history)):
+        if any(records is None for records in (position_deals, orders, history)):
             raise RuntimeError("Incomplete MT5 history; intent remains unresolved")
+        deals = tuple(deal for deal in position_deals if getattr(deal, "order", None) == ticket)
         for record in (*deals, *orders, *history):
             if record.symbol != signal.symbol or record.magic != MAGIC:
                 raise RuntimeError("Broker record does not match expected symbol and magic")
-        for record in deals:
-            if record.order != ticket:
-                raise RuntimeError("Deal belongs to a different order")
         for record in (*orders, *history):
             if record.ticket != ticket:
                 raise RuntimeError("Order ticket mismatch")

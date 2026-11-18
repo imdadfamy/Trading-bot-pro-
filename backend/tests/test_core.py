@@ -99,7 +99,7 @@ class SafetyTests(unittest.TestCase):
                 return type("Account", (), {"trade_mode": self.mode, "login": 111})()
             def terminal_info(self):
                 return type("Terminal", (), {"connected": True, "trade_allowed": self.trade_allowed})()
-            def history_deals_get(self, *, ticket):
+            def history_deals_get(self, *, position):  # the real terminal rejects an order ticket here
                 return self.deals
             def orders_get(self, *, ticket):
                 return self.orders
@@ -121,7 +121,8 @@ class SafetyTests(unittest.TestCase):
             known = replace(self.signal, signal_id="known")
             self.assertEqual(reconcile_demo_ticket(known, broker, journal, expected_account_login=111)["status"], "unresolved")
             self.assertEqual(journal.intent("known")["state"], "accepted")
-            mt5.deals = (type("Deal", (), {"ticket": 456, "order": 123, "symbol": "XAUUSD", "magic": 26001118})(),)
+            mt5.deals = (type("Deal", (), {"ticket": 456, "order": 123, "symbol": "XAUUSD", "magic": 26001118})(),
+                         type("Deal", (), {"ticket": 457, "order": 124, "symbol": "XAUUSD", "magic": 26001118})())  # closing deal
             mt5.mode = 2
             with self.assertRaisesRegex(RuntimeError, "DEMO"):
                 reconcile_demo_ticket(known, broker, journal, expected_account_login=111)

@@ -75,8 +75,10 @@ class FakeMT5:
                                      magic=request["magic"], symbol=request["symbol"]))
         return NS(retcode=self.send_code, order=777, deal=888, volume=request["volume"])
 
-    def history_deals_get(self, ticket=None):
-        return (NS(ticket=888, order=777, symbol="XAUUSD", magic=MAGIC),) if self.send_code == 10009 else ()
+    def history_deals_get(self, position=None):  # by position, like the real terminal
+        return ((NS(ticket=888, order=777, symbol="XAUUSD", magic=MAGIC),
+                 NS(ticket=889, order=778, symbol="XAUUSD", magic=MAGIC))  # 778 = closing order, must be ignored
+                if self.send_code == 10009 else ())
     def orders_get(self, ticket=None): return ()
     def history_orders_get(self, ticket=None): return (NS(ticket=777, symbol="XAUUSD", magic=MAGIC),)
 
