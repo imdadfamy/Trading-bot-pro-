@@ -51,10 +51,9 @@ La commande lance au plus un appel par agent choisi (`graph`, `news`, `quant`), 
 
 Prérequis : le paquet `MetaTrader5` (`python -m pip install MetaTrader5==5.0.6231`), le terminal MetaTrader 5 installé, et `TIP_MT5_DEMO_LOGIN`, `TIP_MT5_DEMO_SERVER` (et au besoin `TIP_MT5_DEMO_PASSWORD`) dans `.env.local`.
 
-**À faire une fois, à la main, dans la fenêtre MetaTrader 5** (l'application ne saisit jamais de mot de passe dans le terminal) :
-1. Fenêtre « Bienvenue dans LiveUpdate » : accepter la mise à jour (recommandé, l'API Python est récente) ou la fermer.
-2. Fenêtre « Ouvrir un compte » : chercher « Deriv », choisir le serveur du compte démo, utiliser « Se connecter à un compte existant », saisir identifiant et mot de passe, cocher l'enregistrement, terminer.
-3. Vérifier que la barre d'état en bas à droite affiche une connexion active.
+**Aucune saisie manuelle n'est nécessaire** : la commande se connecte au terminal avec `TIP_MT5_DEMO_LOGIN`, `TIP_MT5_DEMO_SERVER` et `TIP_MT5_DEMO_PASSWORD` du `.env.local`, par l'API officielle (le mot de passe va à MetaTrader seulement). Un terminal qui démarre sans compte enregistré affiche une fenêtre « Se connecter » ou « Ouvrir un compte » : cette fenêtre l'empêche de répondre à l'application (erreur `-10005`, délai). Il suffit de la **fermer sans rien saisir**, puis de relancer la commande. Après la première connexion réussie, le terminal garde le compte.
+
+L'algo-trading du terminal (bouton « Trading algo » de la barre d'outils) est **désactivé par défaut** ; il n'est nécessaire que pour envoyer des ordres, jamais pour cette lecture.
 
 Puis :
 

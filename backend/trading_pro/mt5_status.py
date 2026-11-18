@@ -68,7 +68,13 @@ def inspect(module, *, expected_login: int, server: str, password: str | None,
     if terminal_path:
         options["path"] = terminal_path
     if not mt5.initialize(**options):
-        raise RuntimeError(f"MT5 terminal could not be initialised (code {mt5.last_error()[0]})")
+        code = mt5.last_error()[0]
+        # -6: the terminal answers but has no authorised account yet. Log in through the official API with the
+        # credentials from the server-side configuration; they are passed to MetaTrader only.
+        if code != -6 or not password:
+            raise RuntimeError(f"MT5 terminal could not be initialised (code {code})")
+        if not mt5.initialize(**options, login=expected_login, password=password, server=server):
+            raise RuntimeError(f"MT5 login refused (code {mt5.last_error()[0]})")
     try:
         account = mt5.account_info()
         if account is None or getattr(account, "login", None) != expected_login:

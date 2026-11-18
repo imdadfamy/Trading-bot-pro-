@@ -11,19 +11,31 @@ class FakeMT5:
     ACCOUNT_TRADE_MODE_DEMO = 0
     ACCOUNT_TRADE_MODE_REAL = 2
 
-    def __init__(self, *, logged_in=True, mode=0, init_ok=True, login_ok=True):
+    def __init__(self, *, logged_in=True, mode=0, init_ok=True, login_ok=True, auth_required=False):
         self.logged_in, self.mode, self.init_ok, self.login_ok = logged_in, mode, init_ok, login_ok
-        self.calls, self.login_args = [], None
+        self.auth_required, self.calls, self.login_args, self.error = auth_required, [], None, (-6, "Authorization failed")
 
     def _log(self, name):
         self.calls.append(name)
 
     def initialize(self, **kwargs):
         self._log("initialize")
-        return self.init_ok
+        if not self.init_ok:
+            self.error = (-10005, "IPC timeout")
+            return False
+        if self.auth_required:
+            if "password" not in kwargs:
+                self.error = (-6, "Authorization failed")
+                return False
+            self.login_args = (kwargs.get("login"), kwargs["password"], kwargs.get("server"))
+            self.logged_in = self.login_ok
+            if not self.login_ok:
+                self.error = (-6, "Authorization failed")
+            return self.login_ok
+        return True
 
     def last_error(self):
-        return (-6, "Authorization failed")
+        return self.error
 
     def login(self, login, password=None, server=None, timeout=None):
         self._log("login")
@@ -120,6 +132,24 @@ class Mt5StatusTests(unittest.TestCase):
         self.assertIn("not DEMO", str(caught.exception))
         self.assertNotIn("symbols_get", fake.calls)
         self.assertEqual(fake.calls[-1], "shutdown")
+
+    def test_terminal_without_account_logs_in_through_initialize_credentials(self):
+        fake = FakeMT5(logged_in=False, auth_required=True)
+        report = run(fake)
+        self.assertEqual(fake.login_args, (LOGIN, PASSWORD, SERVER))
+        self.assertTrue(report["demo_verified"])
+        self.assertNotIn(PASSWORD, json.dumps(report))
+        refused = FakeMT5(logged_in=False, auth_required=True, login_ok=False)
+        with self.assertRaises(RuntimeError) as caught:
+            run(refused)
+        self.assertNotIn(PASSWORD, str(caught.exception))
+        self.assertIn("-6", str(caught.exception))
+        with self.assertRaises(RuntimeError):  # no password configured: never guess, stop
+            inspect(FakeMT5(logged_in=False, auth_required=True), expected_login=LOGIN, server=SERVER, password=None)
+        timeout = FakeMT5(init_ok=False)  # a timeout is not an authorisation problem: no credentials sent
+        with self.assertRaises(RuntimeError):
+            run(timeout)
+        self.assertIsNone(timeout.login_args)
 
     def test_initialisation_failure_and_market_watch_selection_option(self):
         with self.assertRaises(RuntimeError):
