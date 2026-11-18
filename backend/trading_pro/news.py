@@ -19,6 +19,8 @@ class NewsEvent:
     severity: str  # low / medium / critical
     assets: tuple[str, ...]
     corroborations: tuple[str, ...] = ()
+    relevance: str = "unclassified"  # keyword triage label only; never a direction or an asset
+    topics: tuple[str, ...] = ()
 
     @property
     def pauses_entries(self) -> bool:
@@ -27,7 +29,8 @@ class NewsEvent:
 
 def normalize_event(*, source: str, url: str, headline: str, published_at: datetime,
                     received_at: datetime, status="unconfirmed", severity="low",
-                    assets=(), corroborations=(), verified_at=None) -> NewsEvent:
+                    assets=(), corroborations=(), verified_at=None, relevance="unclassified",
+                    topics=()) -> NewsEvent:
     if not all(x.tzinfo is not None for x in (published_at, received_at)):
         raise ValueError("UTC-aware event timestamps required")
     published_at = published_at.astimezone(timezone.utc)
@@ -39,12 +42,15 @@ def normalize_event(*, source: str, url: str, headline: str, published_at: datet
         raise ValueError("Source URL and headline required")
     if status not in {"confirmed", "unconfirmed", "retracted"} or severity not in {"low", "medium", "critical"}:
         raise ValueError("Invalid classification")
+    if relevance not in {"unclassified", "none", "low", "medium", "high"}:
+        raise ValueError("Invalid relevance label")
     if status == "confirmed" and verified_at is None:
         raise ValueError("Confirmation requires verification timestamp")
     normalized = " ".join(headline.casefold().split())
     event_id = sha256(f"{source.casefold()}|{normalized}|{published_at.isoformat()}".encode()).hexdigest()[:32]
     return NewsEvent(event_id, source, url, headline[:500], published_at, received_at,
-                     verified_at, status, severity, tuple(assets), tuple(corroborations))
+                     verified_at, status, severity, tuple(assets), tuple(corroborations),
+                     relevance, tuple(topics))
 
 
 def active_halt(events: list[NewsEvent], symbol: str, as_of: datetime) -> bool:

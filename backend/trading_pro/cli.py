@@ -25,7 +25,12 @@ def main():
     incoming = sub.add_parser("import-news")
     incoming.add_argument("json_file", help="List of event objects, each with source and UTC timestamps")
     provider_news = sub.add_parser("poll-newsapi", help="One explicit fetch; no trading or background worker")
-    provider_news.add_argument("--query", default='"gold" OR "XAUUSD"', help="Search expression, not a trading signal")
+    provider_news.add_argument("--query", default='"gold price" OR "spot gold" OR XAUUSD OR bullion OR "gold futures"',
+                               help="Title search expression, not a trading signal")
+    provider_news.add_argument("--min-relevance", choices=("low", "medium", "high"), default="medium",
+                               help="Keyword relevance floor for storing headlines (default: medium)")
+    provider_news.add_argument("--max-per-source", type=int, default=5,
+                               help="Most articles stored per source in one poll (default: 5)")
     sub.add_parser("poll-calendar", help="One explicit Trading Economics calendar snapshot; no trading")
     synthetic = sub.add_parser("analyze-synthetic", help="Offline descriptive statistics only; no orders")
     synthetic.add_argument("csv", help="Closed candles from one broker and one synthetic symbol")
@@ -102,9 +107,11 @@ def main():
         result = {"imported_versions": inserted, "total": len(records)}
     elif args.command == "poll-newsapi":
         from .integrations import fetch_newsapi
+        from .relevance import select
         events = fetch_newsapi(query=args.query, api_key=os.getenv("TIP_NEWSAPI_KEY", ""))
-        result = {"received": len(events), "imported_versions": sum(store.news(event) for event in events),
-                  "classification": "unconfirmed, no asset assignment, no trading"}
+        kept, report = select(events, minimum=args.min_relevance, max_per_source=args.max_per_source)
+        result = {**report, "imported_versions": sum(store.news(event) for event in kept),
+                  "classification": "unconfirmed, keyword relevance only, no asset assignment, no trading"}
     elif args.command == "poll-calendar":
         from .integrations import fetch_calendar
         releases = fetch_calendar(api_key=os.getenv("TIP_TRADING_ECONOMICS_KEY", ""))

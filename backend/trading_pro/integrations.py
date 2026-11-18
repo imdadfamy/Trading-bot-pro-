@@ -8,6 +8,7 @@ from urllib.parse import urlencode
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from .news import NewsEvent, normalize_event
+from .relevance import classify
 
 
 def credential_status(environ=None) -> dict:
@@ -45,10 +46,13 @@ def normalize_newsapi(payload: dict, *, received_at: datetime) -> list[NewsEvent
         source = article["source"].get("name")
         if not isinstance(source, str) or not source.strip():
             raise ValueError("NewsAPI source missing")
+        headline = article.get("title") or ""
+        relevance, topics = classify(headline)
         events.append(normalize_event(
             source=source.strip(), url=article.get("url", ""),
-            headline=article.get("title") or "", published_at=_parse_time(article.get("publishedAt")),
-            received_at=received_at, status="unconfirmed", severity="low", assets=()))
+            headline=headline, published_at=_parse_time(article.get("publishedAt")),
+            received_at=received_at, status="unconfirmed", severity="low", assets=(),
+            relevance=relevance, topics=topics))
     return events
 
 
@@ -64,7 +68,8 @@ def fetch_newsapi(*, query: str, api_key: str, opener=None) -> list[NewsEvent]:
     if not isinstance(api_key, str) or not api_key.strip():
         raise ValueError("NewsAPI key missing")
     url = "https://newsapi.org/v2/everything?" + urlencode({
-        "q": query.strip(), "language": "en", "sortBy": "publishedAt", "pageSize": 100})
+        "q": query.strip(), "searchIn": "title", "language": "en", "sortBy": "publishedAt",
+        "pageSize": 100})
     request = Request(url, headers={"X-Api-Key": api_key, "Accept": "application/json"})
     transport = opener if opener is not None else build_opener(_NoRedirect()).open
     with transport(request, timeout=8) as response:
