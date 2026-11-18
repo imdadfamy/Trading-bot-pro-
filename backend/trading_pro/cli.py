@@ -32,6 +32,13 @@ def main():
     synthetic.add_argument("--family", required=True,
                            choices=("volatility", "boom", "crash", "step", "range_break", "jump", "other"))
     synthetic.add_argument("--jump-threshold-pct", type=float, default=1.0)
+    deriv = sub.add_parser("fetch-deriv-candles",
+                           help="One explicit public, unauthenticated Deriv history request saved to CSV; no trading")
+    deriv.add_argument("symbol", help="Deriv symbol such as R_75, BOOM500, CRASH500, stpRNG")
+    deriv.add_argument("output", help="New CSV file; refuses to overwrite unless --overwrite")
+    deriv.add_argument("--granularity", type=int, default=60, help="Seconds per candle: 60, 300, 3600...")
+    deriv.add_argument("--count", type=int, default=1000, help="Candles requested, 2 to 5000")
+    deriv.add_argument("--overwrite", action="store_true")
     backtest = sub.add_parser("backtest")
     backtest.add_argument("csv")
     backtest.add_argument("--report", help="Optional JSON output path")
@@ -52,6 +59,15 @@ def main():
     if args.command == "verify-backup":
         result = verify_backup(args.path)
         print(json.dumps(result, indent=2))
+        return
+    if args.command == "fetch-deriv-candles":
+        from .deriv_history import fetch_candles, write_csv
+        candles = fetch_candles(args.symbol, granularity=args.granularity, count=args.count)
+        path = write_csv(candles, args.output, overwrite=args.overwrite)
+        print(json.dumps({"saved": str(path), "symbol": args.symbol, "candles": len(candles),
+                          "first_open": candles[0].opened_at.isoformat(),
+                          "last_close": candles[-1].closed_at.isoformat(), "broker": candles[0].broker,
+                          "note": "Public candles without bid/ask; research only, never execution costs."}, indent=2))
         return
     if args.command == "analyze-synthetic":
         from .synthetic_research import describe

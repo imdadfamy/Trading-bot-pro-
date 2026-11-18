@@ -8,7 +8,7 @@
 | Calendrier économique | API sous licence | Consensus point-in-time, révisions, heures UTC et embargo | Non connecté |
 | Intermarket | API de marché licenciée | DXY, rendements, futures, fréquence, fuseaux, coûts | Non connecté |
 | Alertes | Canal choisi par l'opérateur | Destinataire, secret côté serveur, test de livraison | Journal local seulement |
-| Indices synthétiques | Export CSV du compte démo MT5 ou historique public du fournisseur, analyse hors ligne | Courtier, symboles exacts, contrat, bid/ask, horaires, trous de données | Analyse descriptive hors ligne (`analyze-synthetic`) ; aucune connexion, aucune exécution |
+| Indices synthétiques | Export CSV du compte démo MT5 ou historique public du fournisseur, analyse hors ligne | Courtier, symboles exacts, contrat, bid/ask, horaires, trous de données | Historique public Deriv récupérable à la demande (`fetch-deriv-candles`, sans authentification) et analyse descriptive hors ligne (`analyze-synthetic`) ; aucune exécution |
 
 Pour brancher un fournisseur, ajouter un adaptateur qui normalise les événements avant stockage et ne transmet aux agents que les champs nécessaires. Conserver les clés dans un coffre côté serveur ; aucune clé dans `NEXT_PUBLIC_*`, dans SQLite ou dans les journaux. Ne pas activer automatiquement le mode démo lorsqu'une clé est renseignée.
 

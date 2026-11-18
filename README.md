@@ -28,6 +28,7 @@ python -m trading_pro.cli --database data/trading.db import-news ..\examples\syn
 python -m trading_pro.cli --database data/trading.db cycle ..\examples\synthetic_xauusd.csv
 python -m trading_pro.cli --database data/trading.db backtest ..\examples\synthetic_xauusd.csv
 python -m trading_pro.cli --database data/trading.db evaluate ..\examples\synthetic_xauusd.csv
+python -m trading_pro.cli fetch-deriv-candles R_75 data\r75_1m.csv --count 7000   # historique PUBLIC Deriv, sans compte, une requête
 python -m trading_pro.cli analyze-synthetic ..\examples\synthetic_xauusd.csv --family other   # statistiques descriptives hors ligne, voir docs/INDICES_SYNTHETIQUES.md
 python -m trading_pro.cli --database data/trading.db backup data/trading-backup.db
 python -m trading_pro.cli verify-backup data/trading-backup.db
