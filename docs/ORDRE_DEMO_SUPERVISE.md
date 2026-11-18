@@ -4,6 +4,21 @@
 
 **Qui fait quoi.** Cette procédure est lancée **par toi**. Le programme ne peut pas la déclencher seul, et l'assistant ne l'exécute pas. Chaque étape ci-dessous est une action volontaire.
 
+## Le plus simple : le script guidé
+
+Un script fait les étapes à ta place **sauf les deux gestes qui doivent rester les tiens** : allumer « Trading algo » et taper le mot `ENVOYER`. Il ouvre MetaTrader si besoin, te dit quoi cliquer, attend ton accord à chaque étape, réarme l'arrêt des entrées à la fin quoi qu'il arrive et propose de fermer la position.
+
+```powershell
+Set-Location -LiteralPath 'C:\Users\imdad\TRADING bot pro'
+powershell -NoProfile -ExecutionPolicy Bypass -File .\Lancer-Test-Demo.ps1
+```
+
+Par défaut il utilise **Volatility 75 Index**, ouvert 24 h sur 24 (l'or est fermé de 22 h à 23 h 05 UTC et le week-end). Pour l'or : `-Symbol XAUUSD -MaxSpread ''`.
+
+**Où cliquer pour « Trading algo ».** Dans la fenêtre MetaTrader 5, barre de boutons en haut de la fenêtre : un bouton nommé « Trading algo ». Éteint, son icône est rouge ; allumé, elle est verte (un triangle). Un clic le bascule, comme le raccourci Ctrl+E avec la fenêtre MetaTrader au premier plan. Ce réglage est celui de ton terminal : il autorise les programmes à passer des ordres, c'est pourquoi l'application ne le fait jamais à ta place.
+
+**Où ça tourne.** Tout se passe sur ton ordinateur : le script et les commandes s'exécutent dans le dossier du projet, et MetaTrader 5 est le logiciel déjà installé chez toi. L'interface web du projet (pages sur `127.0.0.1`) **n'a aucun bouton d'envoi** : elle sert à regarder, pas à lancer un ordre.
+
 ## Les garde-fous (tous doivent passer, dans cet ordre)
 
 1. **Phrase exacte tapée par toi**, qui nomme le sens et le symbole.
