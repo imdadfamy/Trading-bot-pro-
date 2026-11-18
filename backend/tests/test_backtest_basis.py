@@ -71,6 +71,48 @@ class PriceBasisTests(unittest.TestCase):
             run_baseline(bars, BacktestConfig(price_basis="ask"))
 
 
+class SpikeGapFillTests(unittest.TestCase):
+    """A stop hit by a spike fills after the jump, not at the stop price."""
+
+    def bars(self, spike_low):
+        bars, previous = [], 100.0
+        for i in range(60):
+            close = spike_low + 0.1 if i == 41 else 100.0
+            low = spike_low if i == 41 else min(previous, close) - 0.1
+            high = max(previous, close) + 0.1
+            at = START + timedelta(minutes=5 * i)
+            bars.append(Candle("TEST", at, at + timedelta(minutes=5), previous, high, low, close, close, close + 0.02, "demo"))
+            previous = close
+        return bars
+
+    def trade(self, fill, spike_low=96.0):
+        bars = self.bars(spike_low)
+        fired = []
+
+        def once(closes, _candles):
+            if len(closes) == 40 and not fired:
+                fired.append(1)
+                return "BUY"
+        cfg = BacktestConfig(stop_distance=0.5, slippage_price=0.0, commission_per_lot_round_trip=0.0,
+                             point_value_per_lot=1.0, min_lot=0.01, stop_fill=fill)
+        from trading_pro.backtest import run_rule
+        return run_rule(bars, cfg, once, "test", warmup=30)["trades"][0]
+
+    def test_spike_bar_fills_at_the_adverse_extreme_only_in_spike_gap_mode(self):
+        level, gap = self.trade("level"), self.trade("spike_gap")
+        self.assertAlmostEqual(level["exit"], level["entry"] - 0.5, places=6)  # stop price
+        self.assertAlmostEqual(gap["exit"], 96.0, places=6)                    # the jump's extreme
+        self.assertLess(gap["pnl"], level["pnl"])
+
+    def test_an_ordinary_bar_is_not_treated_as_a_spike_and_options_are_validated(self):
+        ordinary_level, ordinary_gap = self.trade("level", 99.4), self.trade("spike_gap", 99.4)
+        self.assertAlmostEqual(ordinary_level["exit"], ordinary_gap["exit"], places=6)  # range 0.8 is below 5 x 0.2
+        with self.assertRaises(ValueError):
+            run_baseline(self.bars(96.0), BacktestConfig(stop_fill="worst"))
+        with self.assertRaises(ValueError):
+            run_baseline(self.bars(96.0), BacktestConfig(spike_range_factor=1.0))
+
+
 class CommandOptionTests(unittest.TestCase):
     def run_cli(self, *argv):
         from trading_pro import cli

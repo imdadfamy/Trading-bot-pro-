@@ -17,7 +17,7 @@ def _backtest_config(args, candles, parser):
     """Baseline configuration, overridden by the contract of the instrument when options are given."""
     from dataclasses import replace
     from statistics import median
-    config = BacktestConfig(price_basis=args.price_basis)
+    config = BacktestConfig(price_basis=args.price_basis, stop_fill=args.stop_fill)
     changes = {}
     if args.stop_distance is not None and args.stop_from_range is not None:
         parser.error("Use either --stop-distance or --stop-from-range")
@@ -143,6 +143,8 @@ def main():
     models.add_argument("--max-call-usd", type=float, default=0.05, help="Hard cap for one call (default 0.05)")
     def instrument_options(command):
         command.add_argument("--price-basis", choices=("auto", "mid", "bid"), default="auto")
+        command.add_argument("--stop-fill", choices=("level", "spike_gap"), default="level",
+                             help="spike_gap: a stop hit on a spike bar fills at the bar's adverse extreme (Boom, Crash...)")
         command.add_argument("--stop-distance", type=float, help="Stop distance in price units")
         command.add_argument("--stop-from-range", type=float,
                              help="Stop distance as a multiple of the median bar range (high-low)")
@@ -156,6 +158,12 @@ def main():
     backtest = instrument_options(sub.add_parser("backtest"))
     backtest.add_argument("csv")
     backtest.add_argument("--report", help="Optional JSON output path")
+    rules = instrument_options(sub.add_parser("evaluate-rules",
+                               help="Test family-specific entry rules against random entries (research only)"))
+    rules.add_argument("csv")
+    rules.add_argument("--family", required=True, choices=("boom", "crash", "volatility"))
+    rules.add_argument("--null-runs", type=int, default=300, help="Random-entry simulations (default 300)")
+    rules.add_argument("--seed", type=int, default=1)
     evaluate = instrument_options(sub.add_parser("evaluate"))
     evaluate.add_argument("csv", help="Chronological 60/20/20 evaluation of a fixed baseline")
     cycle = sub.add_parser("cycle")
@@ -330,6 +338,13 @@ def main():
             if args.report:
                 Path(args.report).parent.mkdir(parents=True, exist_ok=True)
                 Path(args.report).write_text(json.dumps(result, indent=2), encoding="utf-8")
+        elif args.command == "evaluate-rules":
+            from .synthetic_rules import evaluate as evaluate_rules
+            try:
+                result = evaluate_rules(candles, args.family, _backtest_config(args, candles, parser),
+                                        null_runs=args.null_runs, seed=args.seed)
+            except ValueError as exc:
+                parser.error(str(exc))
         elif args.command == "evaluate":
             result = chronological_evaluation(candles, _backtest_config(args, candles, parser))
         else:

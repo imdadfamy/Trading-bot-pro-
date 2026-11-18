@@ -12,9 +12,9 @@ TRADING INTELLIGENCE PRO est un **prototype de recherche** sur l'or (XAUUSD) et 
 
 | Mesure | Valeur |
 | --- | --- |
-| Commits | 20 sur `main`, dépôt public |
+| Commits | plus de 20 sur `main`, dépôt public |
 | Code Python | 33 modules, environ 3 600 lignes, plus 2 000 lignes de tests |
-| Tests automatiques | 120 réussis, plus un test Node de navigation |
+| Tests automatiques | 138 réussis, plus un test Node de navigation |
 | Intégration continue GitHub | verte sur les commits vérifiés |
 | Interfaces | 2 (aperçu local sans dépendance, version Next.js), 12 rubriques chacune |
 | Documentation | 12 documents, 37 décisions datées dans `AVANCEMENT.md` |
@@ -45,10 +45,10 @@ Règle de croisement de moyennes 5 contre 20, objectif double, écart réel du c
 | --- | --- | --- | --- | --- |
 | XAUUSD (or) | 295 | 0,73 | −0,20 R (−2 441 $ sur 10 000 $) | 0,69 / 0,92 / 0,76 |
 | Volatility 75 | 112 | 1,07 | +0,04 R | 1,35 / 1,07 / 0,63 |
-| Boom 500 | 253 | 1,02 | +0,02 R | 1,16 / 0,99 / 0,77 |
-| Crash 500 | 258 | 1,10 | +0,07 R | 1,13 / 1,14 / 0,94 |
+| Boom 500 (exécution prudente des stops) | 253 | 0,96 | −0,03 R | 1,11 / 0,94 / 0,68 |
+| Crash 500 (exécution prudente des stops) | 258 | 1,02 | +0,02 R | 1,04 / 1,10 / 0,86 |
 
-Un facteur de profit sous 1 signifie que la règle perd. **L'or** perd sur les trois périodes : ce n'est pas un hasard d'échantillonnage. **Les indices** sont près de l'équilibre, mais l'écart avec le hasard est trop faible pour être réel (erreur typique d'environ 0,1 R) et la période de test, la seule vraiment à part, est sous 1 pour les trois. Aucun des quatre instruments ne montre d'avantage. Ce résultat est utile : il montre que les coûts réels pèsent et qu'une règle de croisement simple ne suffit pas. La suite est de chercher mieux, pas de la déployer. Note d'honnêteté : le premier chiffre publié pour l'or (0,78) sous-estimait les coûts ; un défaut du modèle de coûts a été corrigé (Décision 038).
+Un facteur de profit sous 1 signifie que la règle perd. **L'or** perd sur les trois périodes : ce n'est pas un hasard d'échantillonnage. **Les indices** sont près de l'équilibre, mais l'écart avec le hasard est trop faible pour être réel (erreur typique d'environ 0,1 R) et la période de test, la seule vraiment à part, est sous 1 pour les trois. Aucun des quatre instruments ne montre d'avantage. Un banc d'essai plus exigeant (règles propres à chaque famille d'indices, comparées à des entrées au hasard) confirme : **aucune règle significative** sur Boom, Crash et Volatility 75, ce que Deriv annonce lui-même (aucun motif exploitable, tout motif historique est fortuit). Ce résultat est utile : il montre que les coûts réels pèsent et qu'une règle de croisement simple ne suffit pas. La suite est de chercher mieux, pas de la déployer. Note d'honnêteté : le premier chiffre publié pour l'or (0,78) sous-estimait les coûts ; un défaut du modèle de coûts a été corrigé (Décision 038).
 
 ## Ce que l'application peut apporter
 
@@ -78,8 +78,8 @@ Ce que ce n'est pas : un conseil en investissement, un robot qui fait gagner de 
 4. Fixer les limites de risque et décider de la stratégie à figer pour l'expérience.
 
 **Je peux le faire maintenant**
-5. Essai `order_check` à blanc : le courtier valide un ordre fictif sans l'exécuter.
-6. Chercher une stratégie qui bat les coûts sur les vraies données (la règle de base perd).
+5. (Fait) Essai `order_check` à blanc : le courtier valide un ordre minimal sur l'or et les trois indices, sans exécution.
+6. Étendre la recherche aux autres familles du compte (Drift Switching, DEX, Jump, Step) et accumuler plus de jours de données ; sur les familles testées, rien n'a battu le hasard.
 7. Mesurer la qualité des prompts sur un jeu de cas préparés, et comparer `gpt-6-luna` à `gpt-6.2-sol`.
 8. Frontend : composants shadcn/ui, accessibilité mesurée, tests automatisés.
 9. Demander aux modèles de rédiger en français.

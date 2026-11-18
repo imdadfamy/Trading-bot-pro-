@@ -19,7 +19,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\Start-Local.ps1
 | --- | --- | --- |
 | Vue d'ensemble | Historique local, journal, état d'observation | Capital, equity et cours temps réel du compte démo |
 | Agents IA | Rapports locaux de recherche, ou liste vide | Modèles IA configurés et orchestration continue |
-| 27 compétences | Catalogue de spécifications versionnées | Implémentation et validation de chaque méthode |
+| Compétences | Catalogue de spécifications versionnées (27 prévues, plus 7 pour les indices synthétiques) | Implémentation et validation de chaque méthode |
 | Actualités et marché | Articles et calendrier importés localement, éventuellement synthétiques | Sources mondiales autorisées et suivi continu |
 | Journal des signaux | Décisions de recherche, souvent `WAIT` | Fills et positions réconciliés avec MT5 démo |
 | Sessions | Horaires calculés à titre indicatif | Horaires et fuseau confirmés par le courtier |

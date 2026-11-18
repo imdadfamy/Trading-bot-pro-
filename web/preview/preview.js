@@ -35,14 +35,14 @@ function when(iso) {
   return (typeof iso === "string" && !Number.isNaN(date.getTime())) ? date.toLocaleString("fr-FR", { dateStyle: "medium", timeStyle: "short", timeZone: "UTC" }) + " UTC" : "—";
 }
 const labels = {
-  "Command Center":"Vue d'ensemble", "AI Agents":"Agents IA", "Skills Library":"27 compétences",
+  "Command Center":"Vue d'ensemble", "AI Agents":"Agents IA", "Skills Library":"Compétences",
   "Market Intelligence":"Actualités et marché", "Trading Terminal":"Journal des signaux",
   "Session Analytics":"Sessions", "Strategy Lab":"Backtests", "AI Memory":"Mémoire collective",
   "Risk Center":"Gestion des risques", "API & Integrations":"Intégrations", "Budget Center":"Budget IA", "Settings":"Paramètres"
 };
 const explanations = {
   "AI Agents":"Quatre spécialistes préparent des rapports ; le directeur IA synthétise. Sans fournisseur configuré, aucun agent externe ne tourne en continu.",
-  "Skills Library":"Le catalogue décrit 27 méthodes de recherche ; leur présence n'atteste pas leur validation en conditions de marché.",
+  "Skills Library":"Le catalogue décrit des méthodes de recherche (27 du cahier des charges et 7 propres aux indices synthétiques) ; leur présence n'atteste pas leur validation en conditions de marché.",
   "Market Intelligence":"Les données importées sont datées et peuvent être artificielles. Aucune surveillance mondiale en direct n'est active.",
   "Trading Terminal":"Les signaux affichés sont des décisions de recherche ; aucune position MT5 n'est ouverte par cette interface.",
   "Session Analytics":"Les sessions sont calculées à titre indicatif ; elles doivent être confirmées avec les horaires du courtier.",
@@ -90,7 +90,7 @@ async function dashboard(sequence) {
   append(content,info("Recherche locale sur données d'exemple. Aucun courtier, flux live ou ordre n'est connecté."));
   const snap=data.snapshot;
   if(snap) append(content,info(`Dernier instantané de marché : ${when(snap.observed_at)} · ${freshness(snap)} · ${snap.broker}`,true));
-  append(content,grid("metrics",stat("Capital démo","—","Compte non connecté"),stat("Valeur du compte","—","Aucun compte démo"),stat("Résultat réel","—","Aucun ordre exécuté"),stat("Décisions",value(data.signal_count),"Cycles de recherche")));
+  append(content,grid("metrics",stat("Capital démo","—","Pas encore affiché ici"),stat("Valeur du compte","—","Pas encore affiché ici"),stat("Résultat réel","—","Aucun ordre exécuté"),stat("Décisions",value(data.signal_count),"Cycles de recherche")));
   const agents=card("Dernier avis de chaque rôle");
   ["graph","news","quant","risk","director"].forEach((id,i)=>append(agents,row([`${String(i+1).padStart(2,"0")}  ${role(id)}`,fr("roleHelp",id),latest[id]?action(latest[id]):"AUCUN CYCLE"])));
   append(content,grid("two",chart(history.candles||[]),agents));
@@ -108,7 +108,7 @@ async function generic(page,sequence) {
   const data=await get(endpoints[page]);
   if (sequence !== renderSequence) return;
   if(explanations[page])append(content,info(explanations[page]));
-  if(page==="Skills Library") { append(content,info("Catalogue versionné : spécifications, pas 27 stratégies validées."));renderList("27 compétences",data.map(e=>({...e,roleName:role(e.owner),stateLabel:"spécification"})),["name","roleName","stateLabel"],"Catalogue vide"); }
+  if(page==="Skills Library") { append(content,info("Catalogue versionné : spécifications, pas des stratégies validées."));renderList(`Compétences (${data.length})`,data.map(e=>({...e,roleName:role(e.owner)+(e.scope==="synthetic"?" · indices synthétiques":""),stateLabel:"spécification"})),["name","roleName","stateLabel"],"Catalogue vide"); }
   if(page==="AI Agents") renderList("Analyses par cycle",data.map(e=>({who:role(e.agent),why:rationale(e.rationale),act:action(e.action)})),["who","why","act"],"Aucun cycle lancé");
   if(page==="Market Intelligence") { append(content,info("Les événements d'exemple sont synthétiques. Aucune veille mondiale continue n'est active.",true));renderList("Articles reçus",data.map(item=>({headline:item.headline,label:`${item.source} · ${when(item.published_at)} · ${fr("status",item.status)} · gravité ${fr("severity",item.severity)} · pertinence ${fr("relevance",item.relevance,"non classée")}`})),["headline","label"],"Aucun article reçu");const releases=await get("/calendar/events").catch(()=>[]);if(sequence!==renderSequence)return;renderList("Calendrier économique importé",releases.map(r=>({when:when(r.scheduled_at),country:r.country,event:r.event,imp:`importance ${r.importance}/3`})),["when","country","event","imp"],"Aucun événement de calendrier importé"); }
   if(page==="Trading Terminal") { append(content,info("Journal des décisions de recherche. Aucun ordre MT5 n’a été envoyé."));renderList("Signaux",data.map(s=>({sym:`${s.symbol} · ${fr("status",s.status)}`,why:rationale(s.rationale),act:action(s.action)})),["sym","why","act"],"Aucun signal"); }

@@ -95,7 +95,7 @@ export default function ModuleView({ page }: { page: string }) {
     {loading && <p className="loading">Chargement des données locales…</p>}
     {error && <div className="alert">API locale indisponible. Aucun état de marché ne peut être affiché.</div>}
     {!loading && !error && <>
-      {page === "Skills Library" && <div className="items">{rows(list, 40).map((r, i) => <Item key={i} title={`${String(i + 1).padStart(2, "0")} · ${show(r.name)}`} tag={`v${show(r.version)}`}><span>{role(r.owner)}</span></Item>)}</div>}
+      {page === "Skills Library" && <div className="items">{rows(list, 40).map((r, i) => <Item key={i} title={`${String(i + 1).padStart(2, "0")} · ${show(r.name)}`} tag={`v${show(r.version)}`}><span>{role(r.owner)}{r.scope === "synthetic" ? " · indices synthétiques" : ""}</span></Item>)}</div>}
       {page === "AI Agents" && <div className="items">{list.length ? rows(list).map((r, i) => <Item key={i} title={role(r.agent)} tag={action(r.action)}><span>{rationale(r.rationale)}</span></Item>) : <Empty>Aucune analyse enregistrée</Empty>}</div>}
       {page === "Market Intelligence" && <div className="items">{list.length ? rows(list, 50).map((r, i) => <Item key={i} title={show(r.headline)}><span>{show(r.source)} · {when(r.published_at)} · {fr("status", r.status)} · gravité {fr("severity", r.severity)} · pertinence {fr("relevance", r.relevance, "non classée")}</span></Item>) : <Empty>Aucun événement reçu</Empty>}</div>}
       {page === "Trading Terminal" && <div className="items">{list.length ? rows(list).map((r, i) => <Item key={i} title={action(r.action)}><span>{show(r.symbol)} · {fr("status", r.status)}</span><span>{rationale(r.rationale)}</span></Item>) : <Empty>Aucun signal</Empty>}</div>}

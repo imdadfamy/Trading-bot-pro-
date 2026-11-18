@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
 from math import isfinite
+from functools import lru_cache
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from calendar import monthrange
 
@@ -47,33 +48,42 @@ def _sunday(year: int, month: int, ordinal: int) -> int:
     return days[ordinal-1 if ordinal > 0 else ordinal]
 
 
-def _local_time(instant: datetime, zone: str) -> datetime:
+@lru_cache(maxsize=None)
+def _zone(name: str):
+    """IANA zone, or None when the tz database is not installed (remembered: the lookup is slow to fail)."""
     try:
-        return instant.astimezone(ZoneInfo(zone))
+        return ZoneInfo(name)
     except ZoneInfoNotFoundError:
-        # Windows may omit IANA tzdb. Current statutory rules only (since 2007).
-        # Production pins tzdata; old backtests require the full historical database.
-        utc = instant.astimezone(timezone.utc)
-        year = utc.year
-        if year < 2007:
-            raise ValueError("Historical IANA tzdata required before 2007")
-        if zone == "Asia/Tokyo":
-            offset = 9
-        elif zone == "Europe/London":
-            start = datetime(year, 3, _sunday(year, 3, -1), 1, tzinfo=timezone.utc)
-            end = datetime(year, 10, _sunday(year, 10, -1), 1, tzinfo=timezone.utc)
-            offset = 1 if start <= utc < end else 0
-        elif zone == "America/New_York":
-            start = datetime(year, 3, _sunday(year, 3, 2), 7, tzinfo=timezone.utc)
-            end = datetime(year, 11, _sunday(year, 11, 1), 6, tzinfo=timezone.utc)
-            offset = -4 if start <= utc < end else -5
-        elif zone == "Australia/Sydney":
-            april_end = datetime(year, 4, _sunday(year, 4, 1), 16, tzinfo=timezone.utc)-timedelta(days=1)
-            october_start = datetime(year, 10, _sunday(year, 10, 1), 16, tzinfo=timezone.utc)-timedelta(days=1)
-            offset = 11 if utc < april_end or utc >= october_start else 10
-        else:
-            raise
-        return utc.astimezone(timezone(timedelta(hours=offset)))
+        return None
+
+
+def _local_time(instant: datetime, zone: str) -> datetime:
+    known = _zone(zone)
+    if known is not None:
+        return instant.astimezone(known)
+    # Windows may omit IANA tzdb. Current statutory rules only (since 2007).
+    # Production pins tzdata; old backtests require the full historical database.
+    utc = instant.astimezone(timezone.utc)
+    year = utc.year
+    if year < 2007:
+        raise ValueError("Historical IANA tzdata required before 2007")
+    if zone == "Asia/Tokyo":
+        offset = 9
+    elif zone == "Europe/London":
+        start = datetime(year, 3, _sunday(year, 3, -1), 1, tzinfo=timezone.utc)
+        end = datetime(year, 10, _sunday(year, 10, -1), 1, tzinfo=timezone.utc)
+        offset = 1 if start <= utc < end else 0
+    elif zone == "America/New_York":
+        start = datetime(year, 3, _sunday(year, 3, 2), 7, tzinfo=timezone.utc)
+        end = datetime(year, 11, _sunday(year, 11, 1), 6, tzinfo=timezone.utc)
+        offset = -4 if start <= utc < end else -5
+    elif zone == "Australia/Sydney":
+        april_end = datetime(year, 4, _sunday(year, 4, 1), 16, tzinfo=timezone.utc)-timedelta(days=1)
+        october_start = datetime(year, 10, _sunday(year, 10, 1), 16, tzinfo=timezone.utc)-timedelta(days=1)
+        offset = 11 if utc < april_end or utc >= october_start else 10
+    else:
+        raise ZoneInfoNotFoundError(f"No time zone found with key {zone}")
+    return utc.astimezone(timezone(timedelta(hours=offset)))
 
 
 def sessions_at(instant: datetime) -> tuple[str, ...]:

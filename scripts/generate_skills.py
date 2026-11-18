@@ -1,6 +1,10 @@
 """Generate the complete, versioned research skill catalogue (no external code)."""
 from pathlib import Path
 import json
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from synthetic_skill_specs import SKILLS as SYNTHETIC_SKILLS, SOURCES as SYNTHETIC_SOURCES
 
 GROUPS = {
  "graph": ["Market Structure", "Price Action", "Smart Money Concepts", "Wyckoff Analysis", "Multi-Timeframe Analysis", "Volume Analysis", "Pattern Recognition", "Liquidity Intelligence"],
@@ -74,6 +78,58 @@ WAIT on absent data, unconfirmed critical events, incomplete corroboration, conf
 Fixture: missing input => WAIT; stale source => WAIT; contradictory evidence => WAIT. Measure coverage, false-fact rate, latency p95, abstention and net outcome after costs on held-out samples. Implementation and fixtures pending validation.
 """, encoding="utf-8")
     assert len(catalog) == 27
+    for entry in catalog:
+        entry["scope"] = "core"
+    for spec in SYNTHETIC_SKILLS:
+        catalog.append({"id": spec["id"], "name": spec["name"], "owner": spec["owner"], "version": "0.1.0",
+                        "state": "research_specification", "scope": "synthetic"})
+        folder = root / spec["id"]
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / "SKILL.md").write_text(f"""# {spec['name']}
+
+Version: 0.1.0  
+Owner: {spec['owner']} agent  
+Scope: synthetic indices (Deriv Volatility, Boom/Crash, Drift Switching, DEX, Jump, Step)  
+Status: research specification; no validated trading edge  
+Licence: original project documentation, no third-party code included.
+
+## Objective
+{spec['objective']}
+
+## Sources
+{SYNTHETIC_SOURCES}
+
+## Preconditions
+UTC timestamps, broker and symbol identity, a known synthetic-index family, validated finite numeric values; abort on missing or contradictory inputs. Never send broker orders.
+
+## JSON input
+`{{"cycle_id":"string","skill_version":"0.1.0","inputs":{{"description":"{spec['inputs']}"}}}}`
+
+## JSON output
+`{{"cycle_id":"string","skill":"{spec['id']}","action":"BUY|SELL|WAIT","rationale":"string","evidence":["measurement id"],"score":null,"invalidations":["condition"]}}`
+
+## Method
+{spec['method']}
+
+## Evidence so far
+{spec['evidence']}
+
+## Limits
+{spec['limits']} This specification has no calibrated probability or verified economic edge. Scores are qualitative.
+
+## Positive example
+A fresh, complete sample of a known family yields a traceable report with the measured statistic, its confidence interval, the sample size and a UTC cycle ID; even a directional report cannot bypass the risk engine.
+
+## Negative example
+Unknown family, too few observations, a pattern that does not beat the random-entry null, or a stale quote yields WAIT and a reason.
+
+## Abstention
+WAIT on missing data, unknown family, insufficient sample size (fewer than 30 events), significance not reached after correction for the number of tests, or conflicting evidence.
+
+## Tests and metrics
+Fixture: missing input => WAIT; planted structure => detected; pure noise => not detected. Measure coverage, abstention, p-values against the random-entry null and net outcome after real costs on held-out samples. Implementation pending validation.
+""", encoding="utf-8")
+    assert len(catalog) == 27 + len(SYNTHETIC_SKILLS)
     (root / "catalog.json").write_text(json.dumps(catalog, ensure_ascii=False, indent=2), encoding="utf-8")
 
 if __name__ == "__main__":

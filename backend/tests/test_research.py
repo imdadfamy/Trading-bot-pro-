@@ -97,7 +97,10 @@ class ResearchTests(unittest.TestCase):
                             closed_prices=[2000+i*.1 for i in range(30)])
             self.assertEqual(cycle["signal"].action.value, "WAIT")
             service = Service(path)
-            self.assertEqual(len(service.read("/skills")), 27)
+            skills = service.read("/skills")
+            self.assertEqual(len(skills), 34)
+            self.assertEqual(sum(1 for s in skills if s["scope"] == "core"), 27)  # the specified catalogue
+            self.assertEqual(sum(1 for s in skills if s["scope"] == "synthetic"), 7)  # synthetic-index additions
             self.assertEqual(len(service.read("/signals")), 1)
             current = service.settings()
             self.assertEqual(current["version"], 0)

@@ -4,7 +4,7 @@ import csv
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from statistics import mean
+from statistics import mean, median
 from .analytics import TradeResult, by_session, performance
 from .market import Candle, session_label
 
@@ -26,6 +26,11 @@ class BacktestConfig:
     # "bid": bars are built on the bid price (MetaTrader): a BUY pays the full spread on entry and a SELL's
     # stop and target are tested on ask = bid + spread. "mid": half a spread each way. "auto": detect.
     price_basis: str = "auto"
+    # "level": a stop fills at its price. "spike_gap": on a spike bar (range at least ``spike_range_factor`` times the
+    # median bar range) a stop fills at the adverse extreme of the bar, because a jump leaves no prices to trade in
+    # between. Use it for Boom/Crash/Jump/DEX style markets; the default keeps older results reproducible.
+    stop_fill: str = "level"
+    spike_range_factor: float = 5.0
 
 
 def load_candles(path: str | Path) -> list[Candle]:
@@ -47,7 +52,29 @@ def load_candles(path: str | Path) -> list[Candle]:
     return candles
 
 
+def sma_signal(config: "BacktestConfig"):
+    """Fast/slow moving-average crossover on closed bars (the research baseline)."""
+    def signal(history, _candles):
+        current_fast = mean(history[-config.fast:])
+        current_slow = mean(history[-config.slow:])
+        prior_fast = mean(history[-config.fast-1:-1])
+        prior_slow = mean(history[-config.slow-1:-1])
+        return "BUY" if prior_fast <= prior_slow and current_fast > current_slow else (
+            "SELL" if prior_fast >= prior_slow and current_fast < current_slow else None)
+    return signal
+
+
 def run_baseline(candles: list[Candle], config: BacktestConfig = BacktestConfig()) -> dict:
+    return run_rule(candles, config, sma_signal(config), "SMA baseline 0.1")
+
+
+def run_rule(candles: list[Candle], config: BacktestConfig, signal_fn, label: str = "rule",
+             warmup: int | None = None) -> dict:
+    """Run one entry rule under the shared cost model.
+
+    ``signal_fn(closes_before_bar, candles_before_bar)`` sees only bars closed before the entry bar and
+    returns "BUY", "SELL" or None. ``warmup`` bars are skipped at the start (default: the slow window).
+    """
     if config.fast < 2 or config.slow <= config.fast or config.stop_distance <= 0 or config.reward_multiple <= 0:
         raise ValueError("Invalid strategy parameters")
     if config.point_value_per_lot <= 0 or config.lot_step <= 0 or config.risk_fraction <= 0 or config.slippage_price < 0:
@@ -56,6 +83,10 @@ def run_baseline(candles: list[Candle], config: BacktestConfig = BacktestConfig(
         raise ValueError("Overlapping candles")
     if config.price_basis not in {"auto", "mid", "bid"}:
         raise ValueError("price_basis must be auto, mid or bid")
+    if config.stop_fill not in {"level", "spike_gap"} or config.spike_range_factor <= 1:
+        raise ValueError("stop_fill must be level or spike_gap and spike_range_factor above 1")
+    spike_range = (config.spike_range_factor * median(c.high - c.low for c in candles)
+                   if config.stop_fill == "spike_gap" and candles else float("inf"))
     basis = config.price_basis
     if basis == "auto":
         bid_built = candles and sum(c.bid == c.close for c in candles) >= 0.99 * len(candles)
@@ -64,6 +95,7 @@ def run_baseline(candles: list[Candle], config: BacktestConfig = BacktestConfig(
     trades: list[TradeResult] = []
     ledger = []
     position = None
+    closes = [c.close for c in candles]
     def exit_price_for(bar, position):
         side, entry, stop, target, lots, risk_cash, entered_at = position
         lift = max(0, bar.ask - bar.bid) if basis == "bid" else 0  # a SELL is closed by buying at the ask
@@ -74,6 +106,8 @@ def run_baseline(candles: list[Candle], config: BacktestConfig = BacktestConfig(
         exit_price = stop if hit_stop else target  # stop first if path is ambiguous
         if hit_stop:
             exit_price = min(exit_price, bar.open) if side == "BUY" else max(exit_price, bar.open + lift)
+            if bar.high - bar.low >= spike_range:  # a jump: fill at the adverse extreme, not at the stop price
+                exit_price = min(exit_price, bar.low) if side == "BUY" else max(exit_price, bar.high + lift)
         return exit_price + (-config.slippage_price if side == "BUY" else config.slippage_price)
 
     def close(position, exit_price, bar):
@@ -82,13 +116,13 @@ def run_baseline(candles: list[Candle], config: BacktestConfig = BacktestConfig(
         fees = lots * config.commission_per_lot_round_trip
         pnl = (exit_price-entry) * lots * config.point_value_per_lot * (1 if side == "BUY" else -1) - fees
         equity += pnl
-        result = TradeResult(pnl, risk_cash, fees, session_label(entered_at), "SMA baseline 0.1")
+        result = TradeResult(pnl, risk_cash, fees, session_label(entered_at), label)
         trades.append(result)
         ledger.append({"entered_at": entered_at.isoformat(), "closed_at": bar.closed_at.isoformat(),
                        "action": side, "entry": entry, "exit": exit_price, "lots": lots,
                        "pnl": pnl, "risk_cash": risk_cash, "fees": fees, "session": result.session})
 
-    for i in range(config.slow, len(candles)):
+    for i in range(config.slow if warmup is None else warmup, len(candles)):
         bar = candles[i]
         if position is not None:
             exit_price = exit_price_for(bar, position)
@@ -97,13 +131,7 @@ def run_baseline(candles: list[Candle], config: BacktestConfig = BacktestConfig(
                 position = None
             continue  # no new entry on same bar, avoid ambiguous execution ordering
         prev = candles[i-1]
-        history = [c.close for c in candles[:i]]  # only bars closed before this bar
-        current_fast = mean(history[-config.fast:])
-        current_slow = mean(history[-config.slow:])
-        prior_fast = mean(history[-config.fast-1:-1])
-        prior_slow = mean(history[-config.slow-1:-1])
-        side = "BUY" if prior_fast <= prior_slow and current_fast > current_slow else (
-            "SELL" if prior_fast >= prior_slow and current_fast < current_slow else None)
+        side = signal_fn(closes[:i], candles[:i])  # only bars closed before this bar
         if side is None or equity <= 0:
             continue
         spread = max(0, bar.ask - bar.bid)

@@ -4,188 +4,271 @@
     "name": "Market Structure",
     "owner": "graph",
     "version": "0.1.0",
-    "state": "research_specification"
+    "state": "research_specification",
+    "scope": "core"
   },
   {
     "id": "price-action",
     "name": "Price Action",
     "owner": "graph",
     "version": "0.1.0",
-    "state": "research_specification"
+    "state": "research_specification",
+    "scope": "core"
   },
   {
     "id": "smart-money-concepts",
     "name": "Smart Money Concepts",
     "owner": "graph",
     "version": "0.1.0",
-    "state": "research_specification"
+    "state": "research_specification",
+    "scope": "core"
   },
   {
     "id": "wyckoff-analysis",
     "name": "Wyckoff Analysis",
     "owner": "graph",
     "version": "0.1.0",
-    "state": "research_specification"
+    "state": "research_specification",
+    "scope": "core"
   },
   {
     "id": "multi-timeframe-analysis",
     "name": "Multi-Timeframe Analysis",
     "owner": "graph",
     "version": "0.1.0",
-    "state": "research_specification"
+    "state": "research_specification",
+    "scope": "core"
   },
   {
     "id": "volume-analysis",
     "name": "Volume Analysis",
     "owner": "graph",
     "version": "0.1.0",
-    "state": "research_specification"
+    "state": "research_specification",
+    "scope": "core"
   },
   {
     "id": "pattern-recognition",
     "name": "Pattern Recognition",
     "owner": "graph",
     "version": "0.1.0",
-    "state": "research_specification"
+    "state": "research_specification",
+    "scope": "core"
   },
   {
     "id": "liquidity-intelligence",
     "name": "Liquidity Intelligence",
     "owner": "graph",
     "version": "0.1.0",
-    "state": "research_specification"
+    "state": "research_specification",
+    "scope": "core"
   },
   {
     "id": "quantitative-analysis",
     "name": "Quantitative Analysis",
     "owner": "quant",
     "version": "0.1.0",
-    "state": "research_specification"
+    "state": "research_specification",
+    "scope": "core"
   },
   {
     "id": "market-regime",
     "name": "Market Regime",
     "owner": "quant",
     "version": "0.1.0",
-    "state": "research_specification"
+    "state": "research_specification",
+    "scope": "core"
   },
   {
     "id": "intermarket-analysis",
     "name": "Intermarket Analysis",
     "owner": "quant",
     "version": "0.1.0",
-    "state": "research_specification"
+    "state": "research_specification",
+    "scope": "core"
   },
   {
     "id": "session-intelligence",
     "name": "Session Intelligence",
     "owner": "quant",
     "version": "0.1.0",
-    "state": "research_specification"
+    "state": "research_specification",
+    "scope": "core"
   },
   {
     "id": "volatility-analysis",
     "name": "Volatility Analysis",
     "owner": "quant",
     "version": "0.1.0",
-    "state": "research_specification"
+    "state": "research_specification",
+    "scope": "core"
   },
   {
     "id": "backtesting",
     "name": "Backtesting",
     "owner": "quant",
     "version": "0.1.0",
-    "state": "research_specification"
+    "state": "research_specification",
+    "scope": "core"
   },
   {
     "id": "fundamental-analysis",
     "name": "Fundamental Analysis",
     "owner": "news",
     "version": "0.1.0",
-    "state": "research_specification"
+    "state": "research_specification",
+    "scope": "core"
   },
   {
     "id": "political-intelligence",
     "name": "Political Intelligence",
     "owner": "news",
     "version": "0.1.0",
-    "state": "research_specification"
+    "state": "research_specification",
+    "scope": "core"
   },
   {
     "id": "breaking-news-intelligence",
     "name": "Breaking News Intelligence",
     "owner": "news",
     "version": "0.1.0",
-    "state": "research_specification"
+    "state": "research_specification",
+    "scope": "core"
   },
   {
     "id": "geopolitical-analysis",
     "name": "Geopolitical Analysis",
     "owner": "news",
     "version": "0.1.0",
-    "state": "research_specification"
+    "state": "research_specification",
+    "scope": "core"
   },
   {
     "id": "macroeconomic-analysis",
     "name": "Macroeconomic Analysis",
     "owner": "news",
     "version": "0.1.0",
-    "state": "research_specification"
+    "state": "research_specification",
+    "scope": "core"
   },
   {
     "id": "central-bank-intelligence",
     "name": "Central Bank Intelligence",
     "owner": "news",
     "version": "0.1.0",
-    "state": "research_specification"
+    "state": "research_specification",
+    "scope": "core"
   },
   {
     "id": "economic-calendar",
     "name": "Economic Calendar",
     "owner": "news",
     "version": "0.1.0",
-    "state": "research_specification"
+    "state": "research_specification",
+    "scope": "core"
   },
   {
     "id": "news-sentiment-analysis",
     "name": "News Sentiment Analysis",
     "owner": "news",
     "version": "0.1.0",
-    "state": "research_specification"
+    "state": "research_specification",
+    "scope": "core"
   },
   {
     "id": "event-impact-analysis",
     "name": "Event Impact Analysis",
     "owner": "news",
     "version": "0.1.0",
-    "state": "research_specification"
+    "state": "research_specification",
+    "scope": "core"
   },
   {
     "id": "institutional-flow",
     "name": "Institutional Flow",
     "owner": "news",
     "version": "0.1.0",
-    "state": "research_specification"
+    "state": "research_specification",
+    "scope": "core"
   },
   {
     "id": "market-psychology",
     "name": "Market Psychology",
     "owner": "news",
     "version": "0.1.0",
-    "state": "research_specification"
+    "state": "research_specification",
+    "scope": "core"
   },
   {
     "id": "source-verification",
     "name": "Source Verification",
     "owner": "news",
     "version": "0.1.0",
-    "state": "research_specification"
+    "state": "research_specification",
+    "scope": "core"
   },
   {
     "id": "risk-management",
     "name": "Risk Management",
     "owner": "risk",
     "version": "0.1.0",
-    "state": "research_specification"
+    "state": "research_specification",
+    "scope": "core"
+  },
+  {
+    "id": "synthetic-index-mechanics",
+    "name": "Synthetic Index Mechanics",
+    "owner": "quant",
+    "version": "0.1.0",
+    "state": "research_specification",
+    "scope": "synthetic"
+  },
+  {
+    "id": "spike-process-analysis",
+    "name": "Spike Process Analysis",
+    "owner": "quant",
+    "version": "0.1.0",
+    "state": "research_specification",
+    "scope": "synthetic"
+  },
+  {
+    "id": "drift-regime-detection",
+    "name": "Drift Regime Detection",
+    "owner": "quant",
+    "version": "0.1.0",
+    "state": "research_specification",
+    "scope": "synthetic"
+  },
+  {
+    "id": "constant-volatility-validation",
+    "name": "Constant Volatility Validation",
+    "owner": "quant",
+    "version": "0.1.0",
+    "state": "research_specification",
+    "scope": "synthetic"
+  },
+  {
+    "id": "synthetic-cost-and-contract-check",
+    "name": "Synthetic Cost And Contract Check",
+    "owner": "risk",
+    "version": "0.1.0",
+    "state": "research_specification",
+    "scope": "synthetic"
+  },
+  {
+    "id": "null-hypothesis-testing",
+    "name": "Null Hypothesis Testing",
+    "owner": "quant",
+    "version": "0.1.0",
+    "state": "research_specification",
+    "scope": "synthetic"
+  },
+  {
+    "id": "synthetic-risk-sizing",
+    "name": "Synthetic Risk Sizing",
+    "owner": "risk",
+    "version": "0.1.0",
+    "state": "research_specification",
+    "scope": "synthetic"
   }
 ]

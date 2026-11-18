@@ -4,7 +4,7 @@ type Table = Record<string, string>;
 const tables = labels as unknown as Record<string, Table>;
 
 export const pageLabels: Record<string, string> = {
-  "Command Center": "Vue d'ensemble", "AI Agents": "Agents IA", "Skills Library": "27 compétences",
+  "Command Center": "Vue d'ensemble", "AI Agents": "Agents IA", "Skills Library": "Compétences",
   "Market Intelligence": "Actualités et marché", "Trading Terminal": "Journal des signaux",
   "Session Analytics": "Sessions", "Strategy Lab": "Backtests", "AI Memory": "Mémoire collective",
   "Risk Center": "Gestion des risques", "API & Integrations": "Intégrations", "Budget Center": "Budget IA",
@@ -13,9 +13,9 @@ export const pageLabels: Record<string, string> = {
 
 /** One plain-language sentence per page: what it shows and how to read it. */
 export const pageHelp: Record<string, string> = {
-  "Command Center": "Résumé de l'état du système. Aucun compte n'est connecté et aucun ordre ne peut partir : les tirets « — » signifient « pas de donnée réelle ».",
+  "Command Center": "Résumé de l'état du système. Aucun ordre ne peut partir. Le compte démo est lu par des commandes en lecture seule, pas encore par cette interface : les tirets « — » signifient « pas encore affiché ici ».",
   "AI Agents": "Chaque cycle de recherche produit un avis par rôle. « ATTENTE » est la réponse normale : le système préfère ne rien proposer quand les preuves manquent.",
-  "Skills Library": "Catalogue de 27 méthodes d'analyse rédigées comme spécifications. Ce ne sont pas des stratégies validées.",
+  "Skills Library": "Catalogue de méthodes d'analyse rédigées comme spécifications : 27 prévues au cahier des charges et 7 propres aux indices synthétiques. Ce ne sont pas des stratégies validées.",
   "Market Intelligence": "Titres d'actualité reçus et triés par pertinence pour l'or. Aucun titre n'est une confirmation ni un signal d'achat ou de vente.",
   "Trading Terminal": "Décisions de recherche du système. Aucun ordre n'est envoyé au courtier ; « ATTENTE » signifie qu'aucune entrée n'est proposée.",
   "Session Analytics": "Sessions de marché (Londres, New York…) données à titre indicatif ; elles devront être confirmées avec les horaires du courtier.",
