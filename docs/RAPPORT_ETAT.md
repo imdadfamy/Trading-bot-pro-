@@ -33,6 +33,7 @@ TRADING INTELLIGENCE PRO est un **prototype de recherche** sur l'or (XAUUSD) et 
 | Étude des indices synthétiques (Volatility 75, Boom 500, Crash 500) | Fonctionne sur 17 jours de données réelles du compte démo, avec écart réel | Boom : sauts à la hausse seulement ; Crash : à la baisse ; écart de 2 à 19 % d'une bougie |
 | Agents assistés par un modèle d'IA (`gpt-6.2-sol`) | Un essai réel plafonné a réussi | 3 appels pour 0,0075 $ |
 | Pont d'ordres MT5 | Prêt mais **désactivé** ; choisit le bon mode d'exécution du symbole | Tests |
+| Ordre démo supervisé (un seul ordre minimal, lancé par une personne) | **Prêt, jamais lancé** : mode d'emploi dans `ORDRE_DEMO_SUPERVISE.md` | 18 tests hors ligne de tous les refus et du cas nominal |
 | Journal chaîné, sauvegardes, arrêt des entrées | Fonctionne (l'arrêt est un état enregistré) | Tests |
 
 **Ce qu'elle ne fait pas** : envoyer un ordre, recevoir un flux de cours continu, surveiller le monde en continu, envoyer des alertes, ni utiliser un calendrier économique payant.

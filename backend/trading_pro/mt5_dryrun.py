@@ -32,12 +32,12 @@ def _round(value: float, digits: int) -> float:
     return round(value, digits)
 
 
-def build_signal(info, tick, side: str, now) -> tuple[Signal, Snapshot, float]:
-    """A minimal hypothetical order: smallest volume, stops at twice the broker minimum distance."""
+def build_signal(info, tick, side: str, now, multiple: float = 2.0) -> tuple[Signal, Snapshot, float]:
+    """A minimal order: smallest volume, stops at ``multiple`` times the broker's real minimum distance."""
     point = float(info.point)
     spread = max(0.0, tick.ask - tick.bid)
-    # Twice the real minimum, which is the broker's stop level plus the current spread.
-    distance = max(2 * ((getattr(info, "trade_stops_level", 0) or 0) * point + spread), 10 * point)
+    # ``multiple`` times the real minimum, which is the broker's stop level plus the current spread.
+    distance = max(multiple * ((getattr(info, "trade_stops_level", 0) or 0) * point + spread), 10 * point)
     digits = int(getattr(info, "digits", 2))
     buy = side == "BUY"
     price = tick.ask if buy else tick.bid

@@ -176,6 +176,14 @@ class ResearchStore:
             db.execute("UPDATE operational_state SET value='true' WHERE name='kill_switch'")
         self.journal.log("risk.kill_switch", "global", {"enabled": True})
 
+    def release_killed(self, *, author: str, reason: str):
+        """Lift the stop on new entries. Used by the supervised demo order command, which re-arms it afterwards."""
+        if not isinstance(author, str) or not 1 <= len(author) <= 100 or not isinstance(reason, str) or not 1 <= len(reason) <= 300:
+            raise ValueError("Author and reason are required")
+        with self.journal.connect() as db:
+            db.execute("UPDATE operational_state SET value='false' WHERE name='kill_switch'")
+        self.journal.log("risk.kill_switch_released", "global", {"author": author, "reason": reason})
+
     def killed(self) -> bool:
         with self.journal.connect() as db:
             return db.execute("SELECT value FROM operational_state WHERE name='kill_switch'").fetchone()[0] == "true"

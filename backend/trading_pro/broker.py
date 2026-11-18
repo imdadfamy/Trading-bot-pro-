@@ -5,6 +5,9 @@ from .core import Action, Signal, utcnow
 from .journal import Journal
 
 
+MAGIC = 26001118  # identifies the orders of this project in the broker's history
+
+
 class DemoBroker:
     """Offline test broker. Does not create real market fills."""
     def preflight(self, signal, volume, quote):
@@ -43,7 +46,7 @@ class MT5DemoBroker:
         return {"action": mt5.TRADE_ACTION_DEAL, "symbol": signal.symbol,
                 "volume": volume, "type": mt5.ORDER_TYPE_BUY if signal.action == Action.BUY else mt5.ORDER_TYPE_SELL,
                 "price": price, "sl": signal.stop_loss, "tp": signal.take_profit,
-                "deviation": 10, "magic": 26001118, "comment": signal.signal_id[:31],
+                "deviation": 10, "magic": MAGIC, "comment": signal.signal_id[:31],
                 "type_time": mt5.ORDER_TIME_GTC, "type_filling": filling}
 
     last_check = None  # raw order_check answer of the latest validation, for diagnostics
@@ -121,7 +124,7 @@ class MT5DemoBroker:
         if any(records is None for records in (deals, orders, history)):
             raise RuntimeError("Incomplete MT5 history; intent remains unresolved")
         for record in (*deals, *orders, *history):
-            if record.symbol != signal.symbol or record.magic != 26001118:
+            if record.symbol != signal.symbol or record.magic != MAGIC:
                 raise RuntimeError("Broker record does not match expected symbol and magic")
         for record in deals:
             if record.order != ticket:

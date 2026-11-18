@@ -35,6 +35,7 @@ python -m trading_pro.cli us-events   # prochaines annonces americaines et fenet
 python -m trading_pro.cli fetch-mt5-candles XAUUSD data\xauusd_m5.csv --timeframe M5 --count 5000   # LECTURE SEULE : vraies bougies du compte demo avec ecart reel
 python -m trading_pro.cli mt5-dry-run XAUUSD   # le courtier VALIDE un ordre minimal (order_check) ; rien n'est execute
 python -m trading_pro.cli evaluate-rules data\boom500_m5.csv --family boom --stop-fill spike_gap   # teste des regles contre le hasard ; voir docs/INDICES_SYNTHETIQUES.md
+# Ordre demo SUPERVISE (lance par une personne, jamais par le programme) : voir docs/ORDRE_DEMO_SUPERVISE.md
 python -m trading_pro.cli analyze-synthetic ..\examples\synthetic_xauusd.csv --family other   # statistiques descriptives hors ligne, voir docs/INDICES_SYNTHETIQUES.md
 python -m trading_pro.cli --database data/trading.db backup data/trading-backup.db
 python -m trading_pro.cli verify-backup data/trading-backup.db

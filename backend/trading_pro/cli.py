@@ -129,6 +129,24 @@ def main():
     fm.add_argument("--server-utc-offset-hours", type=float, default=None,
                     help="Broker clock offset to UTC; measured from a fresh tick when omitted")
     fm.add_argument("--terminal-path", default=None)
+    ks = sub.add_parser("kill-switch", help="Stop on new entries: status, activate, or release for ONE supervised attempt")
+    ks.add_argument("action", choices=("status", "activate", "release"))
+    ks.add_argument("--confirm", help="Required phrase to release")
+    ks.add_argument("--reason", help="Why the stop is lifted (kept in the audit journal)")
+    send = sub.add_parser("mt5-send-demo", help="SENDS one minimal order to the MT5 DEMO account (supervised, see docs)")
+    send.add_argument("symbol", help="Exact MT5 symbol, for example XAUUSD")
+    send.add_argument("--side", required=True, choices=("BUY", "SELL"))
+    send.add_argument("--confirm", required=True, help="Exact phrase: ENVOYER UN ORDRE DEMO <BUY|SELL> <SYMBOL>")
+    send.add_argument("--commission", type=float, required=True, help="Round-trip commission per lot you assume (0 if none)")
+    send.add_argument("--slippage-ticks", type=float, required=True, help="Slippage in ticks you assume")
+    send.add_argument("--max-spread", type=float, default=None, help="Spread limit in price units (default: risk engine default)")
+    send.add_argument("--risk-fraction", type=float, default=0.005, help="Risk per trade for the risk engine (max 0.02)")
+    send.add_argument("--select", action="store_true")
+    send.add_argument("--terminal-path", default=None)
+    close = sub.add_parser("mt5-close-demo", help="Closes the open position(s) of this project on a symbol (demo)")
+    close.add_argument("symbol")
+    close.add_argument("--confirm", required=True, help="Exact phrase: FERMER LA POSITION DEMO <SYMBOL>")
+    close.add_argument("--terminal-path", default=None)
     dry = sub.add_parser("mt5-dry-run",
                          help="Ask the MT5 demo broker to CHECK a minimal order (order_check): nothing is executed")
     dry.add_argument("symbol", help="Exact MT5 symbol, for example XAUUSD or 'Boom 500 Index'")
@@ -218,6 +236,30 @@ def main():
         print(json.dumps({"written": not args.dry_run, "changes": summary, **notes,
                           "coverage": us_events.parse(updated).coverage(datetime.now(timezone.utc))}, indent=2))
         return
+    if args.command in ("mt5-send-demo", "mt5-close-demo"):
+        from . import mt5_send, mt5_status
+        try:
+            import MetaTrader5 as terminal_module
+        except ImportError:
+            parser.error("Package MetaTrader5 missing: python -m pip install MetaTrader5==5.0.6231")
+        try:
+            login, server, password = mt5_status.credentials_from_env()
+            default_path = str(mt5_status.DEFAULT_TERMINAL) if mt5_status.DEFAULT_TERMINAL.is_file() else None
+            path = args.terminal_path or default_path
+            guarded_store = ResearchStore(args.database)
+            if args.command == "mt5-send-demo":
+                report = mt5_send.send_supervised(
+                    terminal_module, guarded_store, symbol=args.symbol, side=args.side, confirm=args.confirm,
+                    expected_login=login, server=server, password=password, commission=args.commission,
+                    slippage_ticks=args.slippage_ticks, terminal_path=path, select=args.select,
+                    max_spread=args.max_spread, risk_fraction=args.risk_fraction)
+            else:
+                report = mt5_send.close_demo(terminal_module, guarded_store, symbol=args.symbol, confirm=args.confirm,
+                                             expected_login=login, server=server, password=password, terminal_path=path)
+        except (mt5_send.Refusal, RuntimeError) as exc:
+            parser.error(str(exc))
+        print(json.dumps(report, indent=2, ensure_ascii=False, default=str))
+        return
     if args.command == "mt5-dry-run":
         from . import mt5_dryrun, mt5_status
         try:
@@ -291,7 +333,20 @@ def main():
         print(json.dumps(result, indent=2))
         return
     store = ResearchStore(args.database)
-    if args.command == "backup":
+    if args.command == "kill-switch":
+        from . import mt5_send
+        if args.action == "status":
+            result = {"kill_switch_active": store.killed()}
+        elif args.action == "activate":
+            store.set_killed()
+            result = {"kill_switch_active": True}
+        else:
+            if args.confirm != mt5_send.RELEASE_PHRASE or not args.reason:
+                parser.error(f'Release needs --confirm "{mt5_send.RELEASE_PHRASE}" and --reason "..."')
+            store.release_killed(author="cli-operator", reason=args.reason)
+            result = {"kill_switch_active": False,
+                      "note": "Une seule tentative d'ordre supervisé est possible : l'arrêt se réarme après chaque tentative."}
+    elif args.command == "backup":
         result = backup_database(args.database, args.destination)
     elif args.command == "memory":
         store.remember(cause=args.cause, evidence=args.evidence,
