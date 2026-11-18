@@ -8,10 +8,15 @@
 
 Un script fait les étapes à ta place **sauf les deux gestes qui doivent rester les tiens** : allumer « Trading algo » et taper le mot `ENVOYER`. Il ouvre MetaTrader si besoin, te dit quoi cliquer, attend ton accord à chaque étape, réarme l'arrêt des entrées à la fin quoi qu'il arrive et propose de fermer la position.
 
+**Le plus facile : double-clique sur `Lancer-Test-Demo.bat`** dans le dossier du projet (`C:\Users\imdad\TRADING bot pro`), depuis l'Explorateur de fichiers.
+
+Ou, depuis n'importe quelle fenêtre de commandes (l'invite de commandes classique **ou** PowerShell), cette ligne unique avec le chemin complet fonctionne partout :
+
 ```powershell
-Set-Location -LiteralPath 'C:\Users\imdad\TRADING bot pro'
-powershell -NoProfile -ExecutionPolicy Bypass -File .\Lancer-Test-Demo.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File "C:\Users\imdad\TRADING bot pro\Lancer-Test-Demo.ps1"
 ```
+
+(`Set-Location` n'existe que dans PowerShell : dans l'invite de commandes classique, il faut utiliser le chemin complet ci-dessus.)
 
 Par défaut il utilise **Volatility 75 Index**, ouvert 24 h sur 24 (l'or est fermé de 22 h à 23 h 05 UTC et le week-end). Pour l'or : `-Symbol XAUUSD -MaxSpread ''`.
 
