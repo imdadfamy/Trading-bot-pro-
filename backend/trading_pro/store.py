@@ -64,6 +64,16 @@ class ResearchStore:
             CREATE TABLE IF NOT EXISTS alerts (
               id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, kind TEXT NOT NULL,
               message TEXT NOT NULL, acknowledged_at TEXT);
+            CREATE TABLE IF NOT EXISTS decisions (
+              decision_id TEXT PRIMARY KEY, cycle_id TEXT NOT NULL, symbol TEXT NOT NULL, at TEXT NOT NULL,
+              session TEXT NOT NULL, arm TEXT NOT NULL, action TEXT NOT NULL, status TEXT NOT NULL,
+              detail TEXT NOT NULL, UNIQUE(cycle_id, arm));
+            CREATE INDEX IF NOT EXISTS decisions_open ON decisions(symbol, arm, status);
+            CREATE TABLE IF NOT EXISTS decision_outcomes (
+              decision_id TEXT PRIMARY KEY, resolved_at TEXT NOT NULL, result TEXT NOT NULL,
+              r_multiple REAL NOT NULL, bars_held INTEGER NOT NULL, mfe_r REAL NOT NULL,
+              mae_r REAL NOT NULL, entry REAL NOT NULL, exit_price REAL NOT NULL,
+              FOREIGN KEY(decision_id) REFERENCES decisions(decision_id));
             CREATE TABLE IF NOT EXISTS operational_state (
               name TEXT PRIMARY KEY, value TEXT NOT NULL);
             INSERT OR IGNORE INTO operational_state(name,value) VALUES ('kill_switch','true');
@@ -187,6 +197,16 @@ class ResearchStore:
     def killed(self) -> bool:
         with self.journal.connect() as db:
             return db.execute("SELECT value FROM operational_state WHERE name='kill_switch'").fetchone()[0] == "true"
+
+    def state_get(self, name: str, default: str | None = None) -> str | None:
+        with self.journal.connect() as db:
+            row = db.execute("SELECT value FROM operational_state WHERE name=?", (name,)).fetchone()
+            return row[0] if row else default
+
+    def state_set(self, name: str, value: str) -> None:
+        with self.journal.connect() as db:
+            db.execute("INSERT INTO operational_state(name,value) VALUES(?,?) "
+                       "ON CONFLICT(name) DO UPDATE SET value=excluded.value", (name, value))
 
     def record_usage(self, *, agent, provider, model, input_tokens, output_tokens, cost_usd):
         if min(input_tokens, output_tokens, cost_usd) < 0:

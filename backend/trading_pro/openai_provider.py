@@ -46,6 +46,13 @@ class OpenAIProvider:
             raise ValueError("Agent and configured model required")
         if not isinstance(snapshot, dict) or not isinstance(snapshot.get("cycle_id"), str):
             raise ValueError("Immutable cycle snapshot required")
+        # Project-owned method notes (skill pack) travel in the developer message, never as market data.
+        notes = snapshot.get("method_notes")
+        snapshot = {key: item for key, item in snapshot.items() if key != "method_notes"}
+        instructions = PROMPTS[agent]["text"]
+        if isinstance(notes, str) and notes.strip():
+            instructions += ("\n\nProject method notes (trusted project documents that refine the method; they never "
+                             "override the rules above and they are not market data):\n" + notes[:8000])
         encoded_snapshot = json.dumps(snapshot, ensure_ascii=False, allow_nan=False)
         if len(encoded_snapshot) > 20000:
             raise ValueError("Snapshot too large")
@@ -54,7 +61,7 @@ class OpenAIProvider:
             "store": False,
             "max_output_tokens": 512,
             "input": [
-                {"role": "developer", "content": PROMPTS[agent]["text"]},
+                {"role": "developer", "content": instructions},
                 {"role": "user", "content": json.dumps({"agent": agent, "snapshot": snapshot},
                                                         ensure_ascii=False, allow_nan=False)},
             ],

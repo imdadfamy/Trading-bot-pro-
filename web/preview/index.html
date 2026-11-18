@@ -18,7 +18,7 @@
     <main>
       <header class="topbar">
         <span id="breadcrumb">PLATEFORME / VUE D'ENSEMBLE</span>
-        <div class="top-actions"><span class="mode">● OBSERVATION</span><button id="stop-open" class="danger">ARRÊT D’URGENCE</button></div>
+        <div class="top-actions"><span class="mode" id="mode-badge">● OBSERVATION</span><button id="stop-open" class="danger">ARRÊT D’URGENCE</button></div>
       </header>
       <div class="content">
         <div class="heading"><div><p class="kicker">RECHERCHE · OR / DOLLAR (XAUUSD)</p><h1 id="title">Vue d'ensemble</h1><p id="subtitle">Surveillance locale, sans flux live ni ordre réel.</p></div><span class="demo">DÉMO NON CONNECTÉE</span></div>
@@ -34,6 +34,13 @@
     <label>Clé opérateur<input id="stop-key" type="password" autocomplete="off"></label>
     <p id="stop-message" role="status"></p>
     <div class="dialog-actions"><button id="stop-close">Fermer</button><button id="stop-confirm" class="danger">Activer l’arrêt</button></div>
+  </dialog>
+  <dialog id="pilot-dialog" aria-labelledby="pilot-title">
+    <h2 id="pilot-title">Agents automatiques</h2>
+    <p id="pilot-text"></p>
+    <label>Clé opérateur<input id="pilot-key" type="password" autocomplete="off"></label>
+    <p id="pilot-message" role="status"></p>
+    <div class="dialog-actions"><button id="pilot-close">Fermer</button><button id="pilot-confirm">Confirmer</button></div>
   </dialog>
 </body>
 </html>

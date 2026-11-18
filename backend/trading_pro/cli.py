@@ -133,6 +133,9 @@ def main():
     ks.add_argument("action", choices=("status", "activate", "release"))
     ks.add_argument("--confirm", help="Required phrase to release")
     ks.add_argument("--reason", help="Why the stop is lifted (kept in the audit journal)")
+    pilot = sub.add_parser("autopilot", help="Automatic research pilot (observation only): status, mode, or one cycle")
+    pilot.add_argument("action", choices=("status", "on", "off", "once", "performance"))
+    pilot.add_argument("--symbol", help="With 'once': a single instrument (default: all configured)")
     send = sub.add_parser("mt5-send-demo", help="SENDS one minimal order to the MT5 DEMO account (supervised, see docs)")
     send.add_argument("symbol", help="Exact MT5 symbol, for example XAUUSD")
     send.add_argument("--side", required=True, choices=("BUY", "SELL"))
@@ -346,6 +349,24 @@ def main():
             store.release_killed(author="cli-operator", reason=args.reason)
             result = {"kill_switch_active": False,
                       "note": "Une seule tentative d'ordre supervisé est possible : l'arrêt se réarme après chaque tentative."}
+    elif args.command == "autopilot":
+        from . import autopilot, autopilot_stats
+        if args.action == "status":
+            result = autopilot.status(store)
+        elif args.action in ("on", "off"):
+            result = autopilot.set_mode(store, "observe" if args.action == "on" else "off", author="cli-operator")
+        elif args.action == "performance":
+            result = autopilot_stats.performance(store)
+        else:
+            from . import autopilot_runtime
+            from .service import Service
+            try:
+                pilot_engine = autopilot.Autopilot(store, fetch=autopilot_runtime.mt5_fetcher(),
+                                                   model_setup=autopilot_runtime.model_setup_provider(Service(args.database)))
+            except (ImportError, RuntimeError) as exc:
+                parser.error(str(exc))
+            symbols = [args.symbol] if args.symbol else autopilot.get_config(store)["symbols"]
+            result = [pilot_engine.run_symbol(symbol) for symbol in symbols]
     elif args.command == "backup":
         result = backup_database(args.database, args.destination)
     elif args.command == "memory":

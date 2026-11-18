@@ -1,0 +1,470 @@
+import io
+import json
+import tempfile
+import unittest
+from datetime import datetime, timedelta, timezone
+from email.message import Message
+from pathlib import Path
+
+from trading_pro import autopilot, autopilot_stats
+from trading_pro.autopilot import Autopilot, AutopilotRunner, ModelSetup, consensus, resolve_trade
+from trading_pro.autopilot_features import features, skill_pack
+from trading_pro.core import Action
+from trading_pro.market import Candle
+from trading_pro.models import Budget
+from trading_pro.openai_provider import OpenAIProvider
+from trading_pro.server import handler_factory
+from trading_pro.service import Service
+from trading_pro.store import ResearchStore
+
+STEP = timedelta(minutes=5)
+NOW = datetime(2026, 11, 18, 14, 7, tzinfo=timezone.utc)
+LAST_CLOSE = datetime(2026, 11, 18, 14, 5, tzinfo=timezone.utc)
+
+
+def candle(symbol, closed_at, close, *, high=None, low=None, open_=None, spread=0.02, volume=100):
+    opened = closed_at - STEP
+    o = close if open_ is None else open_
+    h = max(o, close) + 0.3 if high is None else high
+    l = min(o, close) - 0.3 if low is None else low
+    return Candle(symbol, opened, closed_at, o, h, l, close, close, close + spread, "TestBroker", volume)
+
+
+def rising(symbol, end=LAST_CLOSE, n=300, slope=0.1):
+    out = []
+    for i in range(n):
+        closed = end - STEP * (n - 1 - i)
+        out.append(candle(symbol, closed, 100 + slope * i + (0.15 if i % 2 else -0.15)))
+    return out
+
+
+class FakeProvider:
+    def __init__(self, answers=None, fail=False):
+        self.answers = answers or {"graph": "BUY", "quant": "BUY", "news": "WAIT"}
+        self.fail, self.calls = fail, []
+
+    def estimate_cost(self, agent, snapshot):
+        return 0.01
+
+    def classify(self, agent, snapshot, model):
+        self.calls.append((agent, dict(snapshot), model))
+        if self.fail:
+            raise RuntimeError("provider down")
+        return ({"action": self.answers[agent], "rationale": "test", "evidence": ["closed_candle_closes"],
+                 "score": None}, {"input_tokens": 100, "output_tokens": 50, "cost_usd": 0.002})
+
+
+class NoCalendar:
+    def __call__(self):
+        return None
+
+
+class Halting:
+    def halt_reason(self, when):
+        return "Scheduled US announcement: NFP at 13:30 UTC"
+
+    def upcoming(self, when, limit):
+        return []
+
+
+def build(temp, candles_by_symbol, provider=None, calendar=None, clock=lambda: NOW):
+    store = ResearchStore(str(Path(temp) / "t.db"))
+    state = {"candles": candles_by_symbol}
+
+    def fetch(symbol, timeframe, count):
+        return state["candles"][symbol], {}
+
+    setup = ModelSetup(provider, {"graph": "m", "quant": "m", "news": "m"}, Budget(100, 100, 0.25)) if provider else None
+    pilot = Autopilot(store, fetch=fetch, model_setup=setup, clock=clock, calendar_loader=calendar or NoCalendar())
+    return store, pilot, state
+
+
+def decisions(store, **where):
+    clauses = " AND ".join(f"{k}=?" for k in where) or "1=1"
+    with store.journal.connect() as db:
+        return [dict(r) for r in db.execute(f"SELECT * FROM decisions WHERE {clauses} ORDER BY arm", tuple(where.values()))]
+
+
+class PureRulesTests(unittest.TestCase):
+    def test_consensus_needs_two_agreeing_analysts_and_no_opposition(self):
+        self.assertEqual(consensus({"graph": Action.BUY, "quant": Action.BUY, "news": Action.WAIT})[0], Action.BUY)
+        self.assertEqual(consensus({"graph": Action.SELL, "quant": Action.SELL})[0], Action.SELL)
+        self.assertEqual(consensus({"graph": Action.BUY, "quant": Action.BUY, "news": Action.SELL})[0], Action.WAIT)
+        self.assertEqual(consensus({"graph": Action.BUY, "quant": Action.WAIT, "news": Action.WAIT})[0], Action.WAIT)
+        self.assertEqual(consensus({"graph": Action.BUY})[0], Action.WAIT)
+
+    def test_buy_pays_the_spread_and_hits_the_target(self):
+        plan = {"stop_distance": 1.0, "reward_multiple": 2.0, "horizon_bars": 10}
+        bars = [candle("S", LAST_CLOSE + STEP, 100.0, open_=100.0, high=100.5, low=99.8, spread=0.1),
+                candle("S", LAST_CLOSE + STEP * 2, 103.5, open_=100.0, high=103.6, low=99.9, spread=0.1)]
+        out = resolve_trade("BUY", plan, bars)
+        self.assertEqual(out["result"], "target")
+        self.assertAlmostEqual(out["entry"], 100.1)  # open + spread
+        self.assertAlmostEqual(out["r_multiple"], 2.0)
+
+    def test_stop_gap_fills_at_the_open_not_at_the_stop(self):
+        plan = {"stop_distance": 1.0, "reward_multiple": 2.0, "horizon_bars": 10}
+        bars = [candle("S", LAST_CLOSE + STEP, 100.0, open_=100.0, high=100.2, low=99.9, spread=0.0),
+                candle("S", LAST_CLOSE + STEP * 2, 96.0, open_=97.0, high=97.5, low=95.5, spread=0.0)]
+        out = resolve_trade("BUY", plan, bars)
+        self.assertEqual(out["result"], "stop")
+        self.assertAlmostEqual(out["r_multiple"], -3.0)  # filled at the gap open 97, worse than the 99 stop
+
+    def test_sell_is_stopped_on_the_ask_and_timeouts_close_at_the_horizon(self):
+        plan = {"stop_distance": 1.0, "reward_multiple": 2.0, "horizon_bars": 2}
+        stopped = resolve_trade("SELL", plan, [candle("S", LAST_CLOSE + STEP, 100.2, open_=100.0, high=100.95,
+                                                      low=99.9, spread=0.1)])
+        self.assertEqual(stopped["result"], "stop")  # high 100.95 + spread 0.1 reaches the 101.0 stop
+        flat = [candle("S", LAST_CLOSE + STEP * k, 100.0, open_=100.0, high=100.2, low=99.8, spread=0.0) for k in (1, 2)]
+        timed = resolve_trade("SELL", plan, flat)
+        self.assertEqual((timed["result"], timed["bars_held"]), ("timeout", 2))
+
+    def test_not_enough_bars_means_unresolved(self):
+        plan = {"stop_distance": 1.0, "reward_multiple": 2.0, "horizon_bars": 10}
+        self.assertIsNone(resolve_trade("BUY", plan, []))
+        calm = [candle("S", LAST_CLOSE + STEP, 100.0, open_=100.0, high=100.2, low=99.8, spread=0.0)]
+        self.assertIsNone(resolve_trade("BUY", plan, calm))
+
+
+class FeatureAndSkillTests(unittest.TestCase):
+    def test_features_use_closed_bars_only_and_are_reproducible(self):
+        import math
+        bars = [candle("S", LAST_CLOSE - STEP * (299 - i), 100 + 0.3 * i + 3 * math.sin(2 * math.pi * i / 20))
+                for i in range(300)]
+        first, second = features(bars), features(bars)
+        self.assertEqual(first, second)
+        self.assertTrue(first["available"])
+        self.assertEqual(first["structure"], "higher_highs_and_higher_lows")
+        self.assertEqual(len(first["candles_ohlcv"]), 40)
+        self.assertFalse(features(bars[:10])["available"])
+
+    def test_skill_pack_is_seeded_by_the_cycle_and_respects_the_instrument_family(self):
+        a = skill_pack("graph", "XAUUSD", "cycle-1")
+        self.assertEqual(a, skill_pack("graph", "XAUUSD", "cycle-1"))
+        self.assertEqual(len(a["skills"]), 3)
+        self.assertTrue(all(s.split("@")[0] in a["text"] for s in a["skills"]))
+        others = {tuple(skill_pack("graph", "XAUUSD", f"c{i}")["skills"]) for i in range(20)}
+        self.assertGreater(len(others), 1)  # rotation: different cycles test different skills
+        gold_quant = {s.split("@")[0] for s in skill_pack("quant", "XAUUSD", "c", size=20)["skills"]}
+        synthetic_quant = {s.split("@")[0] for s in skill_pack("quant", "Volatility 75 Index", "c", size=20)["skills"]}
+        self.assertNotIn("spike-process-analysis", gold_quant)
+        self.assertIn("spike-process-analysis", synthetic_quant)
+        self.assertEqual(skill_pack("news", "Volatility 75 Index", "c")["skills"], [])  # no news skills for synthetics
+        self.assertEqual(skill_pack("graph", "XAUUSD", "c", size=0)["text"], "")
+
+
+class CycleTests(unittest.TestCase):
+    def test_a_cycle_records_every_arm_and_opens_one_shadow_trade_per_arm(self):
+        with tempfile.TemporaryDirectory() as temp:
+            provider = FakeProvider()
+            store, pilot, _ = build(temp, {"XAUUSD": rising("XAUUSD")}, provider)
+            result = pilot.run_symbol("XAUUSD")
+            self.assertEqual(result["status"], "ok")
+            by_arm = {d["arm"]: d for d in decisions(store)}
+            self.assertEqual(set(by_arm), {"rule:sma_cross", "det:graph", "plain:graph", "plain:quant", "plain:news",
+                                           "plain:director", "skills:graph", "skills:quant", "skills:news",
+                                           "skills:director"})
+            self.assertEqual(by_arm["det:graph"]["action"], "BUY")
+            self.assertEqual(by_arm["plain:director"]["action"], "BUY")
+            self.assertEqual(by_arm["plain:news"]["status"], "wait")
+            self.assertEqual(by_arm["skills:director"]["status"], "open")
+            plan = json.loads(by_arm["skills:director"]["detail"])["plan"]
+            self.assertGreater(plan["stop_distance"], 0)
+            self.assertEqual(len(provider.calls), 6)
+            # the same bar is never analysed twice
+            self.assertEqual(pilot.run_symbol("XAUUSD")["status"], "no_new_bar")
+            self.assertEqual(len(provider.calls), 6)
+            self.assertTrue(store.journal.verify_audit())
+
+    def test_only_the_skills_arm_receives_features_and_method_notes(self):
+        with tempfile.TemporaryDirectory() as temp:
+            provider = FakeProvider()
+            store, pilot, _ = build(temp, {"XAUUSD": rising("XAUUSD")}, provider)
+            pilot.run_symbol("XAUUSD")
+            plain = [c for c in provider.calls if "features" not in c[1]]
+            skilled = [c for c in provider.calls if "features" in c[1]]
+            self.assertEqual((len(plain), len(skilled)), (3, 3))
+            self.assertTrue(all("method_notes" not in c[1] for c in plain))
+            self.assertTrue(all(c[1].get("method_notes") for c in skilled))
+            news = [c for c in skilled if c[0] == "news"][0]
+            self.assertIn("scheduled_us_announcements", news[1])
+            detail = json.loads(next(d for d in decisions(store, arm="skills:graph"))["detail"])
+            self.assertEqual(len(detail["skills"]), 3)
+            self.assertEqual(len(detail["skills_sha256"]), 64)
+            self.assertEqual(json.loads(next(d for d in decisions(store, arm="plain:graph"))["detail"])["skills"], [])
+
+    def test_failed_model_calls_are_recorded_as_failures_and_never_as_analyses(self):
+        with tempfile.TemporaryDirectory() as temp:
+            store, pilot, _ = build(temp, {"XAUUSD": rising("XAUUSD")}, FakeProvider(fail=True))
+            pilot.run_symbol("XAUUSD")
+            by_arm = {d["arm"]: d for d in decisions(store)}
+            for arm in ("plain:graph", "plain:quant", "skills:graph", "plain:director", "skills:director"):
+                self.assertEqual(by_arm[arm]["status"], "model_failed", arm)
+            stats = autopilot_stats.performance(store)
+            self.assertEqual(stats["arms"]["plain:graph"]["answers"], 0)
+            self.assertEqual(stats["arms"]["plain:graph"]["model_failures"], 1)
+            # the deterministic arms still ran
+            self.assertEqual(by_arm["det:graph"]["status"], "open")
+
+    def test_models_follow_their_own_cadence_and_budget(self):
+        with tempfile.TemporaryDirectory() as temp:
+            provider = FakeProvider()
+            clock = {"now": NOW}
+            store, pilot, state = build(temp, {"XAUUSD": rising("XAUUSD")}, provider, clock=lambda: clock["now"])
+            pilot.run_symbol("XAUUSD")
+            clock["now"] = NOW + timedelta(minutes=5)
+            state["candles"]["XAUUSD"] = rising("XAUUSD", end=LAST_CLOSE + STEP)
+            result = pilot.run_symbol("XAUUSD")
+            self.assertEqual(result["models"], "not due")
+            self.assertEqual(len(provider.calls), 6)
+            self.assertEqual(len(decisions(store, status="skipped_open", arm="det:graph")), 1)
+            clock["now"] = NOW + timedelta(minutes=31)
+            state["candles"]["XAUUSD"] = rising("XAUUSD", end=LAST_CLOSE + STEP * 6)
+            pilot.run_symbol("XAUUSD")
+            self.assertEqual(len(provider.calls), 12)
+
+    def test_an_open_trade_resolves_from_the_next_real_bars(self):
+        with tempfile.TemporaryDirectory() as temp:
+            clock = {"now": NOW}
+            store, pilot, state = build(temp, {"XAUUSD": rising("XAUUSD")}, clock=lambda: clock["now"])
+            pilot.run_symbol("XAUUSD")
+            before = next(d for d in decisions(store, arm="det:graph"))
+            self.assertEqual(before["status"], "open")
+            plan = json.loads(before["detail"])["plan"]
+            base = state["candles"]["XAUUSD"]
+            last = base[-1]
+            jump = last.close + plan["stop_distance"] * plan["reward_multiple"] + 2
+            nxt = candle("XAUUSD", LAST_CLOSE + STEP, jump, open_=last.close, high=jump + 0.1, low=last.close - 0.1)
+            state["candles"]["XAUUSD"] = base[1:] + [nxt]
+            clock["now"] = NOW + timedelta(minutes=5)
+            pilot.run_symbol("XAUUSD")
+            after = next(d for d in decisions(store, arm="det:graph") if d["decision_id"] == before["decision_id"])
+            self.assertEqual(after["status"], "resolved")
+            with store.journal.connect() as db:
+                row = dict(db.execute("SELECT * FROM decision_outcomes").fetchone())
+            self.assertEqual(row["result"], "target")
+            self.assertGreater(row["r_multiple"], 1.5)
+
+    def test_a_missing_entry_bar_expires_the_decision_instead_of_inventing_a_fill(self):
+        with tempfile.TemporaryDirectory() as temp:
+            clock = {"now": NOW}
+            store, pilot, state = build(temp, {"XAUUSD": rising("XAUUSD")}, clock=lambda: clock["now"])
+            pilot.run_symbol("XAUUSD")
+            later = LAST_CLOSE + STEP * 100  # a weekend-sized hole
+            state["candles"]["XAUUSD"] = rising("XAUUSD", end=later, n=60)
+            clock["now"] = later + timedelta(minutes=2)
+            pilot.run_symbol("XAUUSD")
+            self.assertTrue(decisions(store, arm="det:graph", status="expired"))
+            with store.journal.connect() as db:
+                self.assertEqual(db.execute("SELECT COUNT(*) FROM decision_outcomes").fetchone()[0], 0)
+
+    def test_stale_data_and_data_errors_never_produce_decisions(self):
+        with tempfile.TemporaryDirectory() as temp:
+            clock = {"now": NOW + timedelta(hours=3)}
+            store, pilot, _ = build(temp, {"XAUUSD": rising("XAUUSD")}, FakeProvider(), clock=lambda: clock["now"])
+            self.assertEqual(pilot.run_symbol("XAUUSD")["status"], "stale")
+            self.assertEqual(decisions(store), [])
+
+            def broken(symbol, timeframe, count):
+                raise RuntimeError("terminal closed")
+            pilot.fetch = broken
+            self.assertEqual(pilot.run_symbol("XAUUSD")["status"], "data_error")
+
+    def test_a_scheduled_announcement_blocks_gold_but_not_synthetic_indices(self):
+        with tempfile.TemporaryDirectory() as temp:
+            provider = FakeProvider()
+            store, pilot, _ = build(temp, {"XAUUSD": rising("XAUUSD"), "Volatility 75 Index": rising("Volatility 75 Index")},
+                                    provider, calendar=lambda: Halting())
+            self.assertEqual(pilot.run_symbol("XAUUSD")["status"], "halted")
+            self.assertEqual(decisions(store, symbol="XAUUSD"), [])
+            self.assertEqual(provider.calls, [])  # no model spend during a blackout
+            self.assertEqual(pilot.run_symbol("Volatility 75 Index")["status"], "ok")
+            arms = {d["arm"] for d in decisions(store, symbol="Volatility 75 Index")}
+            self.assertIn("skills:director", arms)
+            self.assertNotIn("plain:news", arms)  # news agent is not used for synthetic indices
+
+    def test_models_without_configuration_leave_the_baselines_running(self):
+        with tempfile.TemporaryDirectory() as temp:
+            store, pilot, _ = build(temp, {"XAUUSD": rising("XAUUSD")}, None)
+            pilot.model_setup = lambda: "models unavailable: no model chosen in Settings"
+            result = pilot.run_symbol("XAUUSD")
+            self.assertEqual(result["models"], "models unavailable: no model chosen in Settings")
+            self.assertEqual({d["arm"] for d in decisions(store)}, {"rule:sma_cross", "det:graph"})
+
+
+class ModeAndRunnerTests(unittest.TestCase):
+    def test_default_is_off_and_automatic_orders_are_refused(self):
+        with tempfile.TemporaryDirectory() as temp:
+            store = ResearchStore(str(Path(temp) / "t.db"))
+            self.assertEqual(autopilot.get_mode(store), "off")
+            with self.assertRaises(PermissionError):
+                autopilot.set_mode(store, "demo_auto", author="op")
+            with self.assertRaises(ValueError):
+                autopilot.set_mode(store, "turbo", author="op")
+            autopilot.set_mode(store, "observe", author="op")
+            self.assertEqual(autopilot.get_mode(store), "observe")
+            self.assertTrue(store.killed())  # the order kill switch is untouched by observation
+            kinds = [e["kind"] for e in store.journal.events(5)]
+            self.assertIn("autopilot.mode_changed", kinds)
+
+    def test_runner_only_works_while_the_mode_is_observe(self):
+        with tempfile.TemporaryDirectory() as temp:
+            store, pilot, _ = build(temp, {"XAUUSD": rising("XAUUSD"), "Volatility 75 Index": rising("Volatility 75 Index")})
+            runner = AutopilotRunner(pilot)
+            runner.tick()
+            self.assertEqual(decisions(store), [])
+            autopilot.set_mode(store, "observe", author="op")
+            runner.tick()
+            self.assertTrue(decisions(store, symbol="XAUUSD"))
+            self.assertTrue(decisions(store, symbol="Volatility 75 Index"))
+            status = autopilot.status(store, NOW + timedelta(seconds=30))
+            self.assertTrue(status["active"] and status["alive"])
+            self.assertEqual(status["cycles"], 2)
+            autopilot.set_mode(store, "off", author="op")
+            count = len(decisions(store))
+            runner._next_check.clear()
+            runner.tick()
+            self.assertEqual(len(decisions(store)), count)
+
+    def test_a_crashing_cycle_is_counted_and_does_not_stop_the_other_instruments(self):
+        with tempfile.TemporaryDirectory() as temp:
+            def exploding():
+                raise RuntimeError("calendar exploded")
+            store, pilot, _ = build(temp, {"XAUUSD": rising("XAUUSD"), "Volatility 75 Index": rising("Volatility 75 Index")},
+                                    calendar=exploding)
+            autopilot.set_mode(store, "observe", author="op")
+            AutopilotRunner(pilot).tick()
+            status = autopilot.status(store, NOW)
+            self.assertEqual(status["errors"], 1)
+            self.assertIn("calendar exploded", status["last_error"])
+            self.assertTrue(decisions(store, symbol="Volatility 75 Index"))
+
+    def test_config_changes_are_validated_and_journaled(self):
+        with tempfile.TemporaryDirectory() as temp:
+            store = ResearchStore(str(Path(temp) / "t.db"))
+            config = autopilot.set_config(store, {"model_every_minutes": 15, "symbols": ["XAUUSD"]}, author="op")
+            self.assertEqual(config["model_every_minutes"], 15)
+            for bad in ({"model_every_minutes": 1}, {"symbols": []}, {"unknown": 1}, {"timeframe": "W1"},
+                        {"horizon_bars": True}):
+                with self.assertRaises(ValueError):
+                    autopilot.set_config(store, bad, author="op")
+            self.assertEqual(autopilot.get_config(store)["model_every_minutes"], 15)
+
+
+class StatsTests(unittest.TestCase):
+    def add(self, store, arm, symbol, session, values, skills=()):
+        for value in values:
+            self.counter = getattr(self, "counter", 0) + 1
+            decision_id = f"{arm}-{self.counter}"
+            with store.journal.connect() as db:
+                db.execute("INSERT INTO decisions VALUES(?,?,?,?,?,?,?,?,?)",
+                           (decision_id, decision_id, symbol, NOW.isoformat(), session, arm, "BUY", "resolved",
+                            json.dumps({"skills": list(skills)})))
+                db.execute("INSERT INTO decision_outcomes VALUES(?,?,?,?,?,?,?,?,?)",
+                           (decision_id, NOW.isoformat(), "target" if value > 0 else "stop", value, 5, 1.0, 0.5, 1.0, 1.0))
+
+    def test_summary_flags_small_samples_and_requires_a_positive_interval(self):
+        small = autopilot_stats.summarize([2.0, 2.0, 2.0])
+        self.assertTrue(small["small_sample"])
+        self.assertFalse(small["significantly_positive"])
+        steady = autopilot_stats.summarize([1.0, 1.2, 0.8, 1.1, 0.9] * 8)
+        self.assertTrue(steady["significantly_positive"])
+        noisy = autopilot_stats.summarize([2.0, -1.0] * 15)
+        self.assertEqual(noisy["profit_factor"], 2.0)
+        wide = autopilot_stats.summarize([5.0, -4.0] * 15)
+        self.assertFalse(wide["significantly_positive"])  # interval includes zero
+        self.assertIsNone(autopilot_stats.summarize([1.0, 2.0])["profit_factor"])  # no loss: undefined
+        self.assertEqual(autopilot_stats.summarize([])["trades"], 0)
+
+    def test_performance_splits_by_arm_session_and_measures_each_skill_against_its_absence(self):
+        with tempfile.TemporaryDirectory() as temp:
+            store = ResearchStore(str(Path(temp) / "t.db"))
+            self.add(store, "plain:graph", "XAUUSD", "London", [-1.0, 1.0] * 20)
+            self.add(store, "skills:graph", "XAUUSD", "London", [1.0, 2.0, 1.5] * 14, skills=["market-structure@0.1.0"])
+            self.add(store, "skills:graph", "XAUUSD", "London", [-1.0, 1.0] * 16, skills=["price-action@0.1.0"])
+            report = autopilot_stats.performance(store)
+            self.assertEqual(report["resolved_trades"], 40 + 42 + 32)
+            self.assertEqual(report["arms"]["plain:graph"]["trades"], 40)
+            self.assertTrue(any(c["arm"] == "plain:graph" and c["session"] == "London" for c in report["by_arm_session"]))
+            self.assertIsNotNone(report["skills_vs_plain"]["graph"]["difference"])
+            effects = {e["skill"]: e for e in report["skill_effects"]}
+            self.assertGreater(effects["market-structure"]["difference"], effects["price-action"]["difference"])
+            self.assertTrue(effects["market-structure"]["clearly_helps"])
+            self.assertTrue(effects["price-action"]["clearly_hurts"])
+
+    def test_skill_effects_are_marked_underpowered_with_few_trades(self):
+        with tempfile.TemporaryDirectory() as temp:
+            store = ResearchStore(str(Path(temp) / "t.db"))
+            self.add(store, "skills:graph", "XAUUSD", "Tokyo", [3.0, 3.0, 3.0], skills=["wyckoff-analysis@0.1.0"])
+            self.add(store, "skills:graph", "XAUUSD", "Tokyo", [-1.0, -1.0, -1.0], skills=["price-action@0.1.0"])
+            effects = {e["skill"]: e for e in autopilot_stats.performance(store)["skill_effects"]}
+            self.assertTrue(effects["wyckoff-analysis"]["underpowered"])
+            self.assertFalse(effects["wyckoff-analysis"]["clearly_helps"])
+
+
+class HttpAndProviderTests(unittest.TestCase):
+    def call(self, cls, method, path, body=b"", key=None):
+        handler = cls.__new__(cls)
+        headers = Message()
+        headers["Content-Length"] = str(len(body))
+        if key:
+            headers["X-Operator-Key"] = key
+        handler.wfile, handler.rfile = io.BytesIO(), io.BytesIO(body)
+        handler.request_version, handler.requestline = "HTTP/1.1", f"{method} {path} HTTP/1.1"
+        handler.command, handler.path, handler.headers = method, path, headers
+        getattr(handler, f"do_{method}")()
+        head, payload = handler.wfile.getvalue().split(b"\r\n\r\n", 1)
+        return int(head.split()[1]), json.loads(payload)
+
+    def test_the_button_endpoint_needs_the_operator_key_and_only_allows_observation(self):
+        with tempfile.TemporaryDirectory() as temp:
+            service = Service(str(Path(temp) / "db.sqlite"))
+
+            class Runner:
+                started = 0
+                def start(self):
+                    Runner.started += 1
+            cls = handler_factory(service, "secret-key", Runner())
+            self.assertEqual(self.call(cls, "POST", "/autopilot/mode", b'{"mode":"observe"}')[0], 403)
+            self.assertEqual(autopilot.get_mode(service.store), "off")
+            code, payload = self.call(cls, "POST", "/autopilot/mode", b'{"mode":"observe"}', key="secret-key")
+            self.assertEqual((code, payload["mode"]), (200, "observe"))
+            self.assertEqual(Runner.started, 1)
+            self.assertEqual(self.call(cls, "POST", "/autopilot/mode", b'{"mode":"demo_auto"}', key="secret-key")[0], 409)
+            self.assertEqual(self.call(cls, "POST", "/autopilot/mode", b'{"mode":"x"}', key="secret-key")[0], 400)
+            code, payload = self.call(cls, "POST", "/autopilot/mode", b'{"mode":"off"}', key="secret-key")
+            self.assertEqual((code, payload["mode"]), (200, "off"))
+            self.assertEqual(self.call(cls, "GET", "/autopilot")[1]["mode"], "off")
+            self.assertEqual(self.call(cls, "GET", "/autopilot/performance")[0], 200)
+            self.assertEqual(self.call(cls, "GET", "/autopilot/decisions")[0], 200)
+            self.assertTrue(service.store.killed())
+
+    def test_method_notes_travel_in_the_developer_message_not_in_the_market_data(self):
+        seen = {}
+
+        class Response:
+            status = 200
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+            def read(self, size):
+                return json.dumps({"status": "completed", "output": [{"type": "message", "content": [
+                    {"type": "output_text", "text": json.dumps({"action": "WAIT", "rationale": "x", "evidence": [],
+                                                                  "score": None})}]}],
+                                   "usage": {"input_tokens": 10, "output_tokens": 5}}).encode()
+
+        def transport(request, *, timeout):
+            seen["body"] = json.loads(request.data)
+            return Response()
+        provider = OpenAIProvider(api_key="k", input_usd_per_million=2, output_usd_per_million=8, opener=transport)
+        provider.classify("graph", {"cycle_id": "c", "symbol": "XAUUSD", "method_notes": "[market-structure] NOTE-TEXT"}, "m")
+        developer, user = (m["content"] for m in seen["body"]["input"])
+        self.assertIn("NOTE-TEXT", developer)
+        self.assertIn("never override", developer)
+        self.assertNotIn("NOTE-TEXT", user)
+        self.assertNotIn("method_notes", user)
+        provider.classify("graph", {"cycle_id": "c", "symbol": "XAUUSD"}, "m")
+        self.assertNotIn("Project method notes", seen["body"]["input"][0]["content"])
+
+
+if __name__ == "__main__":
+    unittest.main()

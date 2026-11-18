@@ -124,6 +124,15 @@ class Service:
                 return {"configured": False, "upcoming": [], "coverage": {}, "halt_reason": None, "blackout": None}
         if path == "/synthetic/reports":
             return self.store.synthetic_reports()
+        if path == "/autopilot":
+            from . import autopilot
+            return autopilot.status(self.store)
+        if path == "/autopilot/performance":
+            from . import autopilot_stats
+            return autopilot_stats.performance(self.store)
+        if path == "/autopilot/decisions":
+            from . import autopilot_stats
+            return autopilot_stats.recent_decisions(self.store)
         if path == "/experiments":
             from .experiments import ExperimentManager
             return ExperimentManager(self.store).list()

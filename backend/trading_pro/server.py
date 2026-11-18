@@ -9,7 +9,7 @@ from urllib.parse import urlsplit
 from .service import Service
 
 
-def handler_factory(service: Service, operator_key: str | None = None):
+def handler_factory(service: Service, operator_key: str | None = None, runner=None):
     preview = Path(__file__).resolve().parents[2] / "web" / "preview"
     class Handler(BaseHTTPRequestHandler):
         def _static(self, filename, content_type):
@@ -81,6 +81,21 @@ def handler_factory(service: Service, operator_key: str | None = None):
             if urlsplit(self.path).path == "/risk/kill-switch":
                 service.store.set_killed()
                 return self._json(200, {"killed": True})
+            if urlsplit(self.path).path == "/autopilot/mode":
+                from . import autopilot
+                try:
+                    size = int(self.headers.get("Content-Length", "0"))
+                    if size <= 0 or size > 1024:
+                        return self._json(413, {"error": "Invalid request size"})
+                    mode = json.loads(self.rfile.read(size)).get("mode")
+                    result = autopilot.set_mode(service.store, mode, author=self.headers.get("X-Operator-Name", "local-operator"))
+                    if mode == "observe" and runner is not None:
+                        runner.start()
+                    return self._json(200, {**result, "status": autopilot.status(service.store)})
+                except PermissionError as exc:
+                    return self._json(409, {"error": str(exc)})
+                except (ValueError, TypeError, AttributeError, json.JSONDecodeError) as exc:
+                    return self._json(400, {"error": str(exc)})
             if urlsplit(self.path).path == "/experiments":
                 try:
                     size = int(self.headers.get("Content-Length", "0"))
@@ -134,12 +149,26 @@ def main():
     parser = argparse.ArgumentParser(description="Local observation API only")
     parser.add_argument("--database", default=os.getenv("TIP_DB", "data/trading.db"))
     parser.add_argument("--port", type=int, default=8000)
+    parser.add_argument("--no-autopilot", action="store_true", help="Do not start the automatic research pilot thread")
     args = parser.parse_args()
     if not 1 <= args.port <= 65535:
         parser.error("Invalid port")
     service = Service(args.database)
-    server = ThreadingHTTPServer(("127.0.0.1", args.port), handler_factory(service, os.getenv("TIP_OPERATOR_KEY")))
-    print(f"Local observation API: http://127.0.0.1:{args.port} (no broker execution)")
+    runner = None
+    if not args.no_autopilot:
+        from . import autopilot, autopilot_runtime
+        try:
+            fetch = autopilot_runtime.mt5_fetcher()
+        except (ImportError, RuntimeError) as exc:
+            fetch = None
+            print(f"Pilote automatique indisponible : {exc}")
+        if fetch is not None:
+            pilot = autopilot.Autopilot(service.store, fetch=fetch,
+                                        model_setup=autopilot_runtime.model_setup_provider(service))
+            runner = autopilot.AutopilotRunner(pilot)
+            runner.start()  # follows the persisted mode: stays idle while it is "off", resumes after a restart
+    server = ThreadingHTTPServer(("127.0.0.1", args.port), handler_factory(service, os.getenv("TIP_OPERATOR_KEY"), runner))
+    print(f"Local API: http://127.0.0.1:{args.port} (read-only analysis, no broker orders)")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

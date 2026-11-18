@@ -13,3 +13,4 @@
 button:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
 @media(max-width:700px){.sidebar{position:relative;height:auto;overflow:visible}.sidebar nav{padding-bottom:8px}.sidebar nav button{flex-shrink:0}.topbar{gap:12px}.topbar #breadcrumb{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.heading{flex-wrap:wrap}#content{min-height:460px}.row strong{flex-basis:100%}}
 html{scrollbar-gutter:stable}
+.pilot-actions{display:flex;flex-wrap:wrap;gap:12px;margin-top:18px}.pilot-actions button{border-radius:6px;padding:12px 16px;font-weight:700;border:1px solid var(--gold);background:var(--gold);color:#17130b}.pilot-actions button.danger{background:#4b2126;border-color:#8e444a;color:#ffc1c3}.pilot-actions button:disabled{background:#26262b;border-color:var(--line);color:var(--muted);cursor:not-allowed}.pilot-on{color:#22c58b}.pilot-off{color:var(--muted)}

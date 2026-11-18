@@ -46,7 +46,9 @@
     "unconnected": "Non connecté",
     "observation": "Observation (aucun ordre)",
     "demo": "Démo",
-    "none": "Aucun"
+    "none": "Aucun",
+    "observe": "Observation automatique (aucun ordre)",
+    "off": "Arrêté"
   },
   "events": {
     "announcement.blackout": "Fenêtre de prudence : annonce américaine",
@@ -70,7 +72,15 @@
     "risk.kill_switch_released": "Arrêt des nouvelles entrées levé (usage unique)",
     "settings.changed": "Réglages modifiés",
     "signal.created": "Signal de recherche créé",
-    "synthetic.reported": "Étude d'indice synthétique enregistrée"
+    "synthetic.reported": "Étude d'indice synthétique enregistrée",
+    "autopilot.mode_changed": "Pilote automatique : mode modifié",
+    "autopilot.config_changed": "Pilote automatique : réglage modifié",
+    "autopilot.cycle": "Cycle d'analyse automatique terminé",
+    "autopilot.decision": "Décision d'un analyste ou d'une règle enregistrée",
+    "autopilot.outcome": "Résultat d'une décision simulée mesuré",
+    "autopilot.expired": "Décision simulée abandonnée (bougie d'entrée absente)",
+    "autopilot.data_error": "Pilote automatique : données indisponibles",
+    "autopilot.error": "Pilote automatique : erreur interne"
   },
   "gates": {
     "broker_demo_verified": [
@@ -177,5 +187,39 @@
     "expires_soon": "expire bientôt",
     "expired": "expiré",
     "empty": "vide"
+  },
+  "arms": {
+    "rule:sma_cross": "Règle simple (croisement de moyennes)",
+    "det:graph": "Analyste graphique de base (sans IA)",
+    "plain:graph": "Analyste graphique IA (sans compétences)",
+    "plain:quant": "Analyste quantitatif IA (sans compétences)",
+    "plain:news": "Veilleur IA (sans compétences)",
+    "plain:director": "Directeur IA (sans compétences)",
+    "skills:graph": "Analyste graphique IA + compétences",
+    "skills:quant": "Analyste quantitatif IA + compétences",
+    "skills:news": "Veilleur IA + compétences",
+    "skills:director": "Directeur IA + compétences"
+  },
+  "decisionStatus": {
+    "wait": "attente (aucune position simulée)",
+    "open": "position simulée en cours",
+    "resolved": "résultat mesuré",
+    "skipped_open": "ignorée : une position simulée de cette méthode est déjà en cours",
+    "expired": "abandonnée (bougie d'entrée absente)",
+    "model_failed": "IA indisponible : non comptée comme analyse",
+    "skipped_no_atr": "ignorée : volatilité non mesurable"
+  },
+  "outcomes": {
+    "target": "objectif atteint",
+    "stop": "stop touché",
+    "timeout": "délai écoulé"
+  },
+  "sessions": {
+    "Sydney": "Sydney",
+    "Tokyo": "Tokyo",
+    "London": "Londres",
+    "New York": "New York",
+    "London/New York overlap": "Londres / New York (chevauchement)",
+    "Outside indicative sessions": "Hors sessions indicatives"
   }
 }
