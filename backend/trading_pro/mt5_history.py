@@ -17,27 +17,42 @@ TIMEFRAMES = {"M1": 60, "M5": 300, "M15": 900, "M30": 1800, "H1": 3600, "H4": 14
 MAX_BARS = 50000
 
 
-def server_offset_seconds(mt5: ReadOnlyMT5, symbol: str, *, now_epoch: float, explicit_hours: float | None) -> int:
-    """Seconds to subtract from broker-clock timestamps to obtain UTC."""
+def server_offset_seconds(mt5: ReadOnlyMT5, symbol: str, *, now_epoch: float, explicit_hours: float | None,
+                          wait_seconds: float = 0, sleep=time.sleep, clock=time.time) -> int:
+    """Seconds to subtract from broker-clock timestamps to obtain UTC.
+
+    A symbol just added to Market Watch has no live tick yet: wait up to ``wait_seconds``. The tick must be
+    recent AND advance while we watch (a live feed): a stale tick whose age is a whole number of hours would
+    otherwise be mistaken for a server offset.
+    """
     if explicit_hours is not None:
         if not -14 <= explicit_hours <= 14:
             raise ValueError("Server offset must be between -14 and +14 hours")
         return int(round(explicit_hours * 3600))
-    tick = mt5.symbol_info_tick(symbol)
-    if tick is None:
-        raise RuntimeError("No tick available to measure the server clock: pass the server offset explicitly")
-    raw = tick.time - now_epoch
-    offset = int(round(raw / 3600.0)) * 3600  # broker servers use whole-hour offsets
-    if abs(raw - offset) > 30 or abs(offset) > 14 * 3600:
-        raise RuntimeError("The last tick is not fresh enough to measure the server clock (market closed?): "
-                           "pass the server offset explicitly")
-    return offset
+    started, first_time, first_offset = clock(), None, None
+    while True:
+        tick = mt5.symbol_info_tick(symbol)
+        if tick is not None:
+            raw = tick.time - (now_epoch + (clock() - started))
+            offset = int(round(raw / 3600.0)) * 3600  # broker servers use whole-hour offsets
+            if abs(raw - offset) <= 30 and abs(offset) <= 14 * 3600:
+                if first_time is None or offset != first_offset:
+                    first_time, first_offset = tick.time, offset
+                elif tick.time > first_time:
+                    return offset
+            else:
+                first_time = first_offset = None
+        if clock() - started >= wait_seconds:
+            break
+        sleep(1)
+    raise RuntimeError("No live tick to measure the server clock (market closed, or symbol just added): "
+                       "retry in a few seconds or pass the server offset explicitly")
 
 
 def fetch(module, *, symbol: str, timeframe: str, count: int, expected_login: int, server: str,
           password: str | None, terminal_path: str | None = None, select: bool = False,
           utc_offset_hours: float | None = None, now_epoch: float | None = None,
-          timeout_ms: int = 20000) -> tuple[list[Candle], dict]:
+          timeout_ms: int = 20000, wait_seconds: float = 8, sleep=time.sleep) -> tuple[list[Candle], dict]:
     if timeframe not in TIMEFRAMES:
         raise ValueError(f"Timeframe must be one of {', '.join(TIMEFRAMES)}")
     if not 2 <= count <= MAX_BARS:
@@ -57,7 +72,8 @@ def fetch(module, *, symbol: str, timeframe: str, count: int, expected_login: in
         if point <= 0:
             raise RuntimeError("Invalid point size")
         now = now_epoch if now_epoch is not None else time.time()
-        offset = server_offset_seconds(mt5, symbol, now_epoch=now, explicit_hours=utc_offset_hours)
+        offset = server_offset_seconds(mt5, symbol, now_epoch=now, explicit_hours=utc_offset_hours,
+                                      wait_seconds=wait_seconds, sleep=sleep)
         frame = getattr(mt5, f"TIMEFRAME_{timeframe}")
         rates = mt5.copy_rates_from_pos(symbol, frame, 0, count + 1)  # position 0 is the bar still forming
         if rates is None or len(rates) == 0:

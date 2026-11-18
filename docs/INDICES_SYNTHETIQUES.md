@@ -40,3 +40,37 @@ python -m trading_pro.cli analyze-synthetic data\r75_1m.csv --family volatility 
 Symboles vérifiés le 18 novembre 2026 : `R_75` (Volatility 75), `BOOM500`, `CRASH500`. Granularités acceptées : 60, 120, 180, 300, 600, 900, 1800, 3600, 7200, 14400 et 86400 secondes.
 
 **Limites à garder en tête :** ces bougies publiques n'ont ni bid ni ask ; la commande copie la clôture dans `bid` et `ask` et marque le courtier `deriv-public`. Elles ne disent rien des spreads, glissements, volumes ou prix exécutables du compte MT5. Elles servent uniquement à décrire l'échantillon. Un historique récent de quelques jours ne suffit pas à conclure sur la régularité de ces marchés.
+
+## Données réelles du compte démo MT5 (18 novembre 2026)
+
+Les indices synthétiques existent sur le compte démo Deriv, avec le **prix acheteur et vendeur réels**, ce que l'historique public n'offre pas. Export de 5 000 bougies de 5 minutes (du 1er au 18 novembre 2026, marché ouvert 24 h sur 24, aucune pause ni week-end) :
+
+```powershell
+Set-Location -LiteralPath 'C:\Users\imdad\TRADING bot pro\backend'
+python -m trading_pro.cli fetch-mt5-candles "Volatility 75 Index" data\v75_m5.csv --timeframe M5 --count 5000 --select
+python -m trading_pro.cli fetch-mt5-candles "Boom 500 Index" data\boom500_m5.csv --timeframe M5 --count 5000 --select
+python -m trading_pro.cli fetch-mt5-candles "Crash 500 Index" data\crash500_m5.csv --timeframe M5 --count 5000 --select
+python -m trading_pro.cli analyze-synthetic data\v75_m5.csv --family volatility --jump-threshold-pct 0.1 --save
+```
+
+Les noms de symboles sont ceux du terminal (avec espaces). `--select` ajoute le symbole à la liste de surveillance du terminal ; la première fois, l'outil attend quelques secondes un cours vivant pour mesurer l'horloge du serveur (décalage UTC) et refuse un cours figé. Les fichiers restent hors de Git.
+
+| Indice | Écart médian | Écart en % du prix | Écart / mouvement moyen d'une bougie | Sauts de plus de 0,1 % |
+| --- | --- | --- | --- | --- |
+| Volatility 75 | 13,70 (fixe) | 0,035 % | 0,19 | 1 635 hausses, 1 657 baisses |
+| Boom 500 | 0,082 | 0,0014 % | 0,02 | 757 hausses, 0 baisse |
+| Crash 500 | 0,041 | 0,0014 % | 0,02 | 0 hausse, 751 baisses |
+
+Lecture : l'écart n'écrase pas le mouvement d'une bougie de 5 minutes (de 2 % à 19 % de celui-ci), contrairement à ce qu'on pourrait craindre pour Volatility 75. L'asymétrie de Boom et Crash se confirme sur des données réelles du courtier. Les contrats relevés (volume minimal 0,2 pour Boom et Crash, stops minimaux très larges) sont dans `AVANCEMENT.md`, Décision 034. **Une seule bougie manque** (lundi 2 novembre, 13:00 UTC), commune aux trois indices : le contrôle de qualité la refuse, par prudence, tant qu'on ne l'accepte pas explicitement.
+
+### Backtest de base sur ces données
+
+Règle de croisement de moyennes 5 contre 20, stop de 2,5 fois la bougie médiane, objectif double, contrat réel de chaque indice (valeur du point, lots, pas), sans commission (Deriv facture le seul écart sur ces indices, à confirmer), glissement nul par hypothèse :
+
+| Indice | Trades | Facteur de profit | Espérance | Entraînement / validation / test |
+| --- | --- | --- | --- | --- |
+| Volatility 75 | 112 | 1,07 | +0,04 R | 1,35 / 1,07 / 0,63 |
+| Boom 500 | 253 | 1,02 | +0,02 R | 1,16 / 0,99 / 0,77 |
+| Crash 500 | 258 | 1,10 | +0,07 R | 1,13 / 1,14 / 0,94 |
+
+**À ne pas sur-interpréter.** Les facteurs de profit sont proches de 1 et l'écart avec le hasard est faible : avec 112 à 258 trades, l'erreur statistique typique d'une espérance est d'environ 0,09 à 0,13 R, donc +0,02 à +0,07 R ne se distingue pas du hasard. Le point le plus parlant est que la période de **test**, la seule non utilisée pour choisir quoi que ce soit, est sous 1 pour les trois indices (0,63, 0,77, 0,94) : le léger avantage de la première partie s'efface. Ces marchés sont engendrés par un générateur aléatoire ; une règle de croisement n'a aucune raison d'y trouver une structure, ce que ces chiffres confirment. Échantillon : 17 jours.

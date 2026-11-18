@@ -75,3 +75,13 @@ python -m trading_pro.cli backtest data\xauusd_m5.csv
 ```
 
 Les bougies du terminal sont construites sur le prix vendeur ; l'écart enregistré par barre sert à reconstruire le prix acheteur. Le décalage entre l'horloge du serveur et UTC est **mesuré** sur un cours récent (jamais supposé) ; marché fermé, il faut le donner avec `--server-utc-offset-hours`. Seules les bougies terminées sont exportées. Le fichier reste dans `backend/data/`, **ignoré par Git** : ce sont des données du courtier. Si le terminal vient d'être lancé, une fenêtre « Se connecter » peut bloquer la commande (erreur `-10005`) : la fermer sans rien saisir et relancer.
+
+## Backtest avec le contrat réel d'un instrument
+
+`backtest` et `evaluate` acceptent le contrat de l'instrument, relevé avec `mt5-status` (valeur du point = valeur du tick divisée par la taille du tick) :
+
+```powershell
+python -m trading_pro.cli backtest data\v75_m5.csv --stop-from-range 2.5 --point-value 0.01 --min-lot 0.01 --max-lot 15 --lot-step 0.001 --commission 0 --slippage 0
+```
+
+`--stop-from-range 2.5` règle le stop à 2,5 fois la hauteur médiane d'une bougie, ce qui adapte la règle à l'échelle de l'instrument. `--price-basis auto` (défaut) détecte les bougies construites sur le prix vendeur, comme celles du terminal MetaTrader, et applique alors le coût complet de l'écart.

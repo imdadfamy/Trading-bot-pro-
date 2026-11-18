@@ -14,7 +14,7 @@ TRADING INTELLIGENCE PRO est un **prototype de recherche** sur l'or (XAUUSD) et 
 | --- | --- |
 | Commits | 20 sur `main`, dépôt public |
 | Code Python | 33 modules, environ 3 600 lignes, plus 2 000 lignes de tests |
-| Tests automatiques | 113 réussis, plus un test Node de navigation |
+| Tests automatiques | 120 réussis, plus un test Node de navigation |
 | Intégration continue GitHub | verte sur les commits vérifiés |
 | Interfaces | 2 (aperçu local sans dépendance, version Next.js), 12 rubriques chacune |
 | Documentation | 12 documents, 37 décisions datées dans `AVANCEMENT.md` |
@@ -25,30 +25,30 @@ TRADING INTELLIGENCE PRO est un **prototype de recherche** sur l'or (XAUUSD) et 
 | --- | --- | --- |
 | Se connecter au compte démo Deriv, en lecture seule | Fonctionne | Compte démo confirmé, 10 000 $, aucun ordre |
 | Lire les contrats (XAUUSD, indices synthétiques) | Fonctionne | XAUUSD : contrat de 100 oz, lot de 0,01 à 10, stops à 20 points |
-| Exporter de vraies bougies avec l'écart réel | Fonctionne | 5 000 bougies de 5 min, écart médian 0,15 $ |
+| Exporter de vraies bougies avec l'écart réel (or et indices synthétiques) | Fonctionne | 4 séries de 5 000 bougies de 5 min |
 | Contrôler la qualité des données selon les horaires du courtier | Fonctionne | Les pauses du courtier sont connues ; les autres trous restent refusés |
 | Cycle de recherche (quatre rôles et un directeur) | Fonctionne sur données réelles, répond « attente » par prudence | Essai réel |
 | Fenêtres de prudence autour des annonces américaines | Fonctionne | Emploi, inflation, prix à la production et Réserve fédérale, jusqu'en 2027 |
 | Actualités (NewsAPI) avec tri de pertinence pour l'or | Testé en réel ; source gratuite en retard de 24 h | 99 titres sur 100 portent sur l'or |
-| Étude des indices synthétiques | Fonctionne sur 5 jours de données réelles | Boom : sauts à la hausse seulement ; Crash : à la baisse |
+| Étude des indices synthétiques (Volatility 75, Boom 500, Crash 500) | Fonctionne sur 17 jours de données réelles du compte démo, avec écart réel | Boom : sauts à la hausse seulement ; Crash : à la baisse ; écart de 2 à 19 % d'une bougie |
 | Agents assistés par un modèle d'IA (`gpt-6.2-sol`) | Un essai réel plafonné a réussi | 3 appels pour 0,0075 $ |
 | Pont d'ordres MT5 | Prêt mais **désactivé** ; choisit le bon mode d'exécution du symbole | Tests |
 | Journal chaîné, sauvegardes, arrêt des entrées | Fonctionne (l'arrêt est un état enregistré) | Tests |
 
 **Ce qu'elle ne fait pas** : envoyer un ordre, recevoir un flux de cours continu, surveiller le monde en continu, envoyer des alertes, ni utiliser un calendrier économique payant.
 
-## Résultat de la stratégie de base sur le vrai XAUUSD
+## Résultat de la stratégie de base sur de vraies données
 
-Moyenne mobile 5 contre 20, stop de 3 $, objectif double, écart réel du courtier, commission de 7 $ par lot et glissement de 0,10 $ (hypothèses provisoires) :
+Règle de croisement de moyennes 5 contre 20, objectif double, écart réel du courtier (coût complet : les bougies sont sur le prix vendeur), contrat réel de chaque instrument :
 
-| Période | Trades | Facteur de profit | Résultat |
-| --- | --- | --- | --- |
-| Tout l'échantillon (26 jours) | 294 | 0,78 | −2 019 $ sur 10 000 $ |
-| Entraînement | 173 | 0,76 | −1 364 $ |
-| Validation | 54 | 0,92 | −141 $ |
-| Test | 64 | 0,76 | −494 $ |
+| Instrument | Trades | Facteur de profit | Espérance | Entraînement / validation / test |
+| --- | --- | --- | --- | --- |
+| XAUUSD (or) | 295 | 0,73 | −0,20 R (−2 441 $ sur 10 000 $) | 0,69 / 0,92 / 0,76 |
+| Volatility 75 | 112 | 1,07 | +0,04 R | 1,35 / 1,07 / 0,63 |
+| Boom 500 | 253 | 1,02 | +0,02 R | 1,16 / 0,99 / 0,77 |
+| Crash 500 | 258 | 1,10 | +0,07 R | 1,13 / 1,14 / 0,94 |
 
-Un facteur de profit sous 1 signifie que la règle perd de l'argent. Elle perd sur les trois périodes, donc ce n'est pas un hasard d'échantillonnage. Ce résultat est utile : il montre que les coûts réels pèsent lourd et qu'une règle de croisement simple n'a pas d'avantage. La suite est de chercher mieux, pas de la déployer.
+Un facteur de profit sous 1 signifie que la règle perd. **L'or** perd sur les trois périodes : ce n'est pas un hasard d'échantillonnage. **Les indices** sont près de l'équilibre, mais l'écart avec le hasard est trop faible pour être réel (erreur typique d'environ 0,1 R) et la période de test, la seule vraiment à part, est sous 1 pour les trois. Aucun des quatre instruments ne montre d'avantage. Ce résultat est utile : il montre que les coûts réels pèsent et qu'une règle de croisement simple ne suffit pas. La suite est de chercher mieux, pas de la déployer. Note d'honnêteté : le premier chiffre publié pour l'or (0,78) sous-estimait les coûts ; un défaut du modèle de coûts a été corrigé (Décision 038).
 
 ## Ce que l'application peut apporter
 

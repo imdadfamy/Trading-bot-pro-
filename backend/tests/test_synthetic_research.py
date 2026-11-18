@@ -64,6 +64,17 @@ class SyntheticResearchTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             describe(data, family="not-a-family")
 
+    def test_execution_cost_appears_only_when_a_real_spread_exists(self):
+        flat = [Candle(c.symbol, c.opened_at, c.closed_at, c.open, c.high, c.low, c.close, c.close, c.close, c.broker)
+                for c in candles()]
+        self.assertIsNone(describe(flat, family="volatility")["execution_cost"])  # bid == ask: no spread data
+        wide = [Candle(c.symbol, c.opened_at, c.closed_at, c.open, c.high, c.low, c.close, c.close, c.close + 0.5, c.broker)
+                for c in candles()]
+        cost = describe(wide, family="volatility")["execution_cost"]
+        self.assertAlmostEqual(cost["median_spread"], 0.5)
+        self.assertGreater(cost["spread_as_share_of_a_typical_bar_move"], 1)  # 0.5 on ~100 vs 0.05% drift per bar
+        self.assertEqual(cost["max_spread"], 0.5)
+
     def test_reports_are_stored_read_only_and_exposed_by_the_service(self):
         report = describe(candles(), family="volatility")
         with tempfile.TemporaryDirectory() as folder:

@@ -13,6 +13,26 @@ from .backup import backup_database, verify_backup
 from datetime import datetime
 
 
+def _backtest_config(args, candles, parser):
+    """Baseline configuration, overridden by the contract of the instrument when options are given."""
+    from dataclasses import replace
+    from statistics import median
+    config = BacktestConfig(price_basis=args.price_basis)
+    changes = {}
+    if args.stop_distance is not None and args.stop_from_range is not None:
+        parser.error("Use either --stop-distance or --stop-from-range")
+    if args.stop_from_range is not None:
+        if args.stop_from_range <= 0 or not candles:
+            parser.error("--stop-from-range must be positive and the CSV must contain candles")
+        changes["stop_distance"] = args.stop_from_range * median(c.high - c.low for c in candles)
+    for option, field in (("stop_distance", "stop_distance"), ("point_value", "point_value_per_lot"),
+                          ("min_lot", "min_lot"), ("max_lot", "max_lot"), ("lot_step", "lot_step"),
+                          ("commission", "commission_per_lot_round_trip"), ("slippage", "slippage_price")):
+        if getattr(args, option) is not None:
+            changes[field] = getattr(args, option)
+    return replace(config, **changes)
+
+
 def _announcement_halt(parser, when):
     """Reason to suspend entries at ``when`` because of a scheduled US announcement, or None."""
     from . import us_events
@@ -115,10 +135,22 @@ def main():
     models.add_argument("--agents", default="graph,news,quant", help="Comma list among graph, news, quant")
     models.add_argument("--model", help="Model name for every chosen agent (default: versioned settings)")
     models.add_argument("--max-call-usd", type=float, default=0.05, help="Hard cap for one call (default 0.05)")
-    backtest = sub.add_parser("backtest")
+    def instrument_options(command):
+        command.add_argument("--price-basis", choices=("auto", "mid", "bid"), default="auto")
+        command.add_argument("--stop-distance", type=float, help="Stop distance in price units")
+        command.add_argument("--stop-from-range", type=float,
+                             help="Stop distance as a multiple of the median bar range (high-low)")
+        command.add_argument("--point-value", type=float, help="Account currency per price unit per lot (tick value / tick size)")
+        command.add_argument("--min-lot", type=float)
+        command.add_argument("--max-lot", type=float)
+        command.add_argument("--lot-step", type=float)
+        command.add_argument("--commission", type=float, help="Round-trip commission per lot")
+        command.add_argument("--slippage", type=float, help="Slippage in price units per fill")
+        return command
+    backtest = instrument_options(sub.add_parser("backtest"))
     backtest.add_argument("csv")
     backtest.add_argument("--report", help="Optional JSON output path")
-    evaluate = sub.add_parser("evaluate")
+    evaluate = instrument_options(sub.add_parser("evaluate"))
     evaluate.add_argument("csv", help="Chronological 60/20/20 evaluation of a fixed baseline")
     cycle = sub.add_parser("cycle")
     cycle.add_argument("csv", help="Closed bars from the same broker and symbol")
@@ -270,13 +302,13 @@ def main():
         if args.command == "import-candles":
             result = {"imported": sum(store.candle(c) for c in candles), "total": len(candles)}
         elif args.command == "backtest":
-            result = run_baseline(candles)
+            result = run_baseline(candles, _backtest_config(args, candles, parser))
             store.backtest(str(Path(args.csv).name), result)
             if args.report:
                 Path(args.report).parent.mkdir(parents=True, exist_ok=True)
                 Path(args.report).write_text(json.dumps(result, indent=2), encoding="utf-8")
         elif args.command == "evaluate":
-            result = chronological_evaluation(candles)
+            result = chronological_evaluation(candles, _backtest_config(args, candles, parser))
         else:
             if not candles:
                 parser.error("CSV has no candles")

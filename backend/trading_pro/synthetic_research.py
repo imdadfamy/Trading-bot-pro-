@@ -64,6 +64,17 @@ def describe(candles: list[Candle], *, family: str, jump_threshold_pct: float = 
 
     split = max(1, int(len(returns) * .8))
     broker, symbol = candles[0].broker, candles[0].symbol
+    spreads = sorted(c.ask - c.bid for c in candles)
+    execution_cost = None
+    typical_move = 100 * mean(abs(r) for r in returns) if returns else 0
+    if spreads[-1] > 0 and typical_move > 0:
+        spread_pct = 100 * spreads[len(spreads) // 2] / median(c.close for c in candles)
+        execution_cost = {"median_spread": spreads[len(spreads) // 2], "max_spread": spreads[-1],
+                          "median_spread_pct_of_price": spread_pct,
+                          "mean_absolute_bar_move_pct": typical_move,
+                          "spread_as_share_of_a_typical_bar_move": spread_pct / typical_move,
+                          "note": "A round trip pays about one spread. A share above 1 means the spread alone costs "
+                                  "more than the typical move of one bar."}
     return {
         "mode": "observation", "action": "WAIT", "family": family,
         "broker": broker, "symbol": symbol, "timeframe_seconds": int(next(iter(periods))),
@@ -71,6 +82,7 @@ def describe(candles: list[Candle], *, family: str, jump_threshold_pct: float = 
         "all": segment(returns), "earlier_80_pct": segment(returns[:split]),
         "later_20_pct": segment(returns[split:]),
         "statistically_sufficient": len(returns) >= 100 and len(returns[split:]) >= 30,
+        "execution_cost": execution_cost,
         "interpretation": "Descriptive historical frequencies only; confidence interval assumes independent observations and may be misleading for dependent ticks. No prediction, trade signal or broker execution.",
         "feed_note": "Use broker-specific bid/ask and contract metadata before any execution study; public data may differ from the MT5 account.",
     }

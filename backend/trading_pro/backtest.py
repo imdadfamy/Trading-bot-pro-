@@ -23,6 +23,9 @@ class BacktestConfig:
     max_lot: float = 10.0
     lot_step: float = .01
     min_lot: float = .01
+    # "bid": bars are built on the bid price (MetaTrader): a BUY pays the full spread on entry and a SELL's
+    # stop and target are tested on ask = bid + spread. "mid": half a spread each way. "auto": detect.
+    price_basis: str = "auto"
 
 
 def load_candles(path: str | Path) -> list[Candle]:
@@ -51,19 +54,26 @@ def run_baseline(candles: list[Candle], config: BacktestConfig = BacktestConfig(
         raise ValueError("Invalid cost or risk metadata")
     if any(a.closed_at > b.opened_at for a, b in zip(candles, candles[1:])):
         raise ValueError("Overlapping candles")
+    if config.price_basis not in {"auto", "mid", "bid"}:
+        raise ValueError("price_basis must be auto, mid or bid")
+    basis = config.price_basis
+    if basis == "auto":
+        bid_built = candles and sum(c.bid == c.close for c in candles) >= 0.99 * len(candles)
+        basis = "bid" if bid_built else "mid"
     equity = config.starting_equity
     trades: list[TradeResult] = []
     ledger = []
     position = None
     def exit_price_for(bar, position):
         side, entry, stop, target, lots, risk_cash, entered_at = position
-        hit_stop = bar.low <= stop if side == "BUY" else bar.high >= stop
-        hit_target = bar.high >= target if side == "BUY" else bar.low <= target
+        lift = max(0, bar.ask - bar.bid) if basis == "bid" else 0  # a SELL is closed by buying at the ask
+        hit_stop = bar.low <= stop if side == "BUY" else bar.high + lift >= stop
+        hit_target = bar.high >= target if side == "BUY" else bar.low + lift <= target
         if not (hit_stop or hit_target):
             return None
         exit_price = stop if hit_stop else target  # stop first if path is ambiguous
         if hit_stop:
-            exit_price = min(exit_price, bar.open) if side == "BUY" else max(exit_price, bar.open)
+            exit_price = min(exit_price, bar.open) if side == "BUY" else max(exit_price, bar.open + lift)
         return exit_price + (-config.slippage_price if side == "BUY" else config.slippage_price)
 
     def close(position, exit_price, bar):
@@ -97,7 +107,10 @@ def run_baseline(candles: list[Candle], config: BacktestConfig = BacktestConfig(
         if side is None or equity <= 0:
             continue
         spread = max(0, bar.ask - bar.bid)
-        entry = bar.open + (spread / 2 + config.slippage_price) * (1 if side == "BUY" else -1)
+        if basis == "bid":
+            entry = bar.open + (spread + config.slippage_price if side == "BUY" else -config.slippage_price)
+        else:
+            entry = bar.open + (spread / 2 + config.slippage_price) * (1 if side == "BUY" else -1)
         stop = entry + (-config.stop_distance if side == "BUY" else config.stop_distance)
         target = entry + (config.stop_distance * config.reward_multiple if side == "BUY" else -config.stop_distance * config.reward_multiple)
         risk_budget = equity * config.risk_fraction
@@ -114,7 +127,8 @@ def run_baseline(candles: list[Candle], config: BacktestConfig = BacktestConfig(
         if exit_price is not None:
             close(position, exit_price, bar)
             position = None
-    return {"config": config.__dict__, "metrics": performance(trades, config.starting_equity),
+    return {"config": {**config.__dict__, "resolved_price_basis": basis},
+            "metrics": performance(trades, config.starting_equity),
             "sessions": by_session(trades, config.starting_equity), "trades": ledger,
             "open_position_at_end": position is not None, "candles": len(candles),
             "warning": "Research baseline; illustrative contract metadata and unverified historical feed"}
