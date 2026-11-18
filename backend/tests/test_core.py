@@ -139,6 +139,7 @@ class SafetyTests(unittest.TestCase):
             ACCOUNT_TRADE_MODE_DEMO = 0
             TRADE_ACTION_DEAL = ORDER_TYPE_BUY = ORDER_TYPE_SELL = 1
             ORDER_TIME_GTC = ORDER_FILLING_IOC = 1
+            ORDER_FILLING_FOK = 0
             TRADE_RETCODE_DONE = 10009
             TRADE_RETCODE_DONE_PARTIAL = 10010
             TRADE_RETCODE_REJECT = 10006
@@ -147,7 +148,9 @@ class SafetyTests(unittest.TestCase):
             def terminal_info(self):
                 return type("Terminal", (), {"connected": True, "trade_allowed": True})()
             def symbol_info(self, symbol):
-                return type("Info", (), {"visible": True, "point": .01, "volume_min": .01, "volume_max": 10})()
+                return type("Info", (), {"visible": True, "point": .01, "volume_min": .01, "volume_max": 10,
+                                         "volume_step": .01, "filling_mode": 1, "trade_mode": 4,
+                                         "trade_stops_level": 0})()
             def symbol_info_tick(self, symbol):
                 return type("Tick", (), {"ask": 2000.1, "bid": 2000})()
             def order_check(self, request):

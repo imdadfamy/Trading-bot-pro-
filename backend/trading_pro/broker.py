@@ -1,4 +1,5 @@
 """MT5 bridge. Never submits to an account unless its trade_mode is DEMO."""
+from decimal import Decimal
 from math import isfinite
 from .core import Action, Signal, utcnow
 from .journal import Journal
@@ -27,35 +28,63 @@ class MT5DemoBroker:
             raise RuntimeError("Terminal unavailable for trading")
         return account
 
-    def _request(self, signal, volume, quote):
+    def _filling(self, info):
+        """Pick a fill mode the symbol advertises: all-or-nothing (FOK) first, then IOC. Never guess."""
+        supported = getattr(info, "filling_mode", 0) or 0
+        if supported & getattr(self.mt5, "SYMBOL_FILLING_FOK", 1):
+            return self.mt5.ORDER_FILLING_FOK
+        if supported & getattr(self.mt5, "SYMBOL_FILLING_IOC", 2):
+            return self.mt5.ORDER_FILLING_IOC
+        raise RuntimeError("Symbol does not advertise a market fill mode (FOK or IOC)")
+
+    def _request(self, signal, volume, quote, filling):
         mt5 = self.mt5
         price = quote.ask if signal.action == Action.BUY else quote.bid
         return {"action": mt5.TRADE_ACTION_DEAL, "symbol": signal.symbol,
                 "volume": volume, "type": mt5.ORDER_TYPE_BUY if signal.action == Action.BUY else mt5.ORDER_TYPE_SELL,
                 "price": price, "sl": signal.stop_loss, "tp": signal.take_profit,
                 "deviation": 10, "magic": 26001118, "comment": signal.signal_id[:31],
-                "type_time": mt5.ORDER_TIME_GTC, "type_filling": mt5.ORDER_FILLING_IOC}
+                "type_time": mt5.ORDER_TIME_GTC, "type_filling": filling}
 
-    def preflight(self, signal, volume, quote):
+    def _checked_request(self, signal, volume, quote):
+        """Validate against the live contract, then ask the broker to check the exact request."""
         self._assert_demo()
         info = self.mt5.symbol_info(signal.symbol)
         tick = self.mt5.symbol_info_tick(signal.symbol)
         if info is None or tick is None or not info.visible:
             raise RuntimeError("Symbol or tick unavailable")
+        if getattr(info, "trade_mode", 4) != getattr(self.mt5, "SYMBOL_TRADE_MODE_FULL", 4):
+            raise RuntimeError("Symbol is not fully tradable")
         if abs(tick.ask - quote.ask) > info.point * 10 or abs(tick.bid - quote.bid) > info.point * 10:
             raise RuntimeError("Broker quote moved; risk must be recalculated")
         if volume < info.volume_min or volume > info.volume_max:
             raise RuntimeError("Broker volume invalid")
-        result = self.mt5.order_check(self._request(signal, volume, quote))
+        step = getattr(info, "volume_step", None)
+        if step:
+            steps = (Decimal(str(volume)) - Decimal(str(info.volume_min))) / Decimal(str(step))
+            if steps != steps.to_integral_value():
+                raise RuntimeError("Volume is not a multiple of the broker volume step")
+        level = getattr(info, "trade_stops_level", 0) or 0
+        price = tick.ask if signal.action == Action.BUY else tick.bid
+        minimum = level * info.point
+        for stop in (signal.stop_loss, signal.take_profit):
+            if stop is not None and abs(price - stop) < minimum:
+                raise RuntimeError("Stop or target closer than the broker minimum distance")
+        request = self._request(signal, volume, quote, self._filling(info))
+        result = self.mt5.order_check(request)
         if result is None or result.retcode != 0:
             raise RuntimeError("MT5 order_check rejected")
+        return request
+
+    def preflight(self, signal, volume, quote):
+        self._checked_request(signal, volume, quote)
         return True
 
     def send(self, signal, volume, quote):
         if not self.demo_execution_enabled:
             raise RuntimeError("MT5 demo execution is disabled by default")
-        self.preflight(signal, volume, quote)  # refresh account, tick and order_check immediately before send
-        result = self.mt5.order_send(self._request(signal, volume, quote))
+        request = self._checked_request(signal, volume, quote)  # refresh account, tick and order_check just before send
+        result = self.mt5.order_send(request)
         if result is None:
             raise RuntimeError("MT5 send outcome unknown; reconcile before retry")
         if result.retcode == self.mt5.TRADE_RETCODE_DONE:

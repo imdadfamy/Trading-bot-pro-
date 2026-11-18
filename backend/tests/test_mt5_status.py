@@ -108,6 +108,7 @@ class Mt5StatusTests(unittest.TestCase):
         hidden = next(s for s in report["symbols"] if s["name"].startswith("Volatility"))
         self.assertIsNone(hidden["last_tick"])  # not in Market Watch: no tick, nothing selected
         self.assertNotIn("symbol_select", fake.calls)
+        self.assertTrue(any("Trading algo" in note for note in report["notes"]))  # fake terminal: algo trading off
         text = json.dumps(report)
         self.assertNotIn(PASSWORD, text)
         self.assertNotIn(str(LOGIN), text)

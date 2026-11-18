@@ -120,6 +120,10 @@ def inspect(module, *, expected_login: int, server: str, password: str | None,
         report["symbols"] = symbols
         report["notes"] = ["Les horaires de session du courtier ne sont pas exposés par l'API Python : à relever dans MT5.",
                            "Commissions et glissement ne figurent pas dans l'API : à relever auprès du courtier."]
+        if not report["terminal"]["algo_trading_allowed"]:
+            report["notes"].append("Trading algo désactivé dans le terminal : normal tant qu'aucun ordre n'est autorisé. "
+                                   "Il ne sert qu'à envoyer des ordres, jamais à lire. Pour l'activer plus tard : bouton "
+                                   "« Trading algo » de la barre d'outils MetaTrader 5 (ou Ctrl+E), par l'utilisateur.")
         return report
     finally:
         mt5.shutdown()
