@@ -46,3 +46,21 @@ python -m trading_pro.cli --database data/trading.db analyze-with-models ..\exam
 ```
 
 La commande lance au plus un appel par agent choisi (`graph`, `news`, `quant`), chacun borné par le plafond par appel, le plafond quotidien et le plafond de l'expérience. Elle ne lance aucun ordre. Configurer aussi un plafond de dépense côté OpenAI : le plafond local n'est pas une garantie de facturation.
+
+## Contrôle du compte MT5 démo (lecture seule)
+
+Prérequis : le paquet `MetaTrader5` (`python -m pip install MetaTrader5==5.0.6231`), le terminal MetaTrader 5 installé, et `TIP_MT5_DEMO_LOGIN`, `TIP_MT5_DEMO_SERVER` (et au besoin `TIP_MT5_DEMO_PASSWORD`) dans `.env.local`.
+
+**À faire une fois, à la main, dans la fenêtre MetaTrader 5** (l'application ne saisit jamais de mot de passe dans le terminal) :
+1. Fenêtre « Bienvenue dans LiveUpdate » : accepter la mise à jour (recommandé, l'API Python est récente) ou la fermer.
+2. Fenêtre « Ouvrir un compte » : chercher « Deriv », choisir le serveur du compte démo, utiliser « Se connecter à un compte existant », saisir identifiant et mot de passe, cocher l'enregistrement, terminer.
+3. Vérifier que la barre d'état en bas à droite affiche une connexion active.
+
+Puis :
+
+```powershell
+Set-Location -LiteralPath 'C:\Users\imdad\TRADING bot pro\backend'
+python -m trading_pro.cli mt5-status
+```
+
+La commande refuse tout compte qui n'est pas **DEMO**, n'appelle aucune fonction de trading (elle est protégée par une liste de fonctions autorisées), masque l'identifiant, n'affiche jamais le mot de passe et liste XAUUSD et les indices synthétiques avec leur contrat (lot, tick, volume, écart, niveau de stops, modes d'exécution). `--select` ajoute les symboles trouvés à la liste de surveillance du terminal pour lire un cours.

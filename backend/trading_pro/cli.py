@@ -75,6 +75,11 @@ def main():
     deriv.add_argument("--granularity", type=int, default=60, help="Seconds per candle: 60, 300, 3600...")
     deriv.add_argument("--count", type=int, default=1000, help="Candles requested, 2 to 5000")
     deriv.add_argument("--overwrite", action="store_true")
+    mt5 = sub.add_parser("mt5-status", help="READ-ONLY check of the MT5 demo account and symbol specifications; no order")
+    mt5.add_argument("--terminal-path", default=None, help="Path to terminal64.exe (default: standard install folder)")
+    mt5.add_argument("--pattern", action="append", help="Symbol name pattern such as XAU* (repeatable)")
+    mt5.add_argument("--max-symbols", type=int, default=40)
+    mt5.add_argument("--select", action="store_true", help="Also add the found symbols to Market Watch (to read ticks)")
     models = sub.add_parser("analyze-with-models",
                             help="One explicit model-assisted cycle: paid provider calls, budget capped, no orders")
     models.add_argument("csv", help="Closed candles, same format as the cycle command")
@@ -101,6 +106,23 @@ def main():
     if args.command == "verify-backup":
         result = verify_backup(args.path)
         print(json.dumps(result, indent=2))
+        return
+    if args.command == "mt5-status":
+        from . import mt5_status
+        try:
+            import MetaTrader5 as terminal_module
+        except ImportError:
+            parser.error("Package MetaTrader5 missing: python -m pip install MetaTrader5==5.0.6231")
+        try:
+            login, server, password = mt5_status.credentials_from_env()
+            default_path = str(mt5_status.DEFAULT_TERMINAL) if mt5_status.DEFAULT_TERMINAL.is_file() else None
+            report = mt5_status.inspect(terminal_module, expected_login=login, server=server, password=password,
+                                        patterns=tuple(args.pattern) if args.pattern else mt5_status.DEFAULT_PATTERNS,
+                                        terminal_path=args.terminal_path or default_path,
+                                        max_symbols=args.max_symbols, select_symbols=args.select)
+        except RuntimeError as exc:
+            parser.error(str(exc))
+        print(json.dumps(report, indent=2, ensure_ascii=False))
         return
     if args.command == "fetch-deriv-candles":
         from .deriv_history import fetch_candles, write_csv
