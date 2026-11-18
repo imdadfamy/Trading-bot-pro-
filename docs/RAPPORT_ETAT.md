@@ -1,95 +1,105 @@
-# Rapport d'état — 18 novembre 2026
+# Rapport d'état — 18 novembre 2026 (mis à jour en fin de journée)
 
 ## En une minute
 
-TRADING INTELLIGENCE PRO est aujourd'hui un **prototype de recherche** sur l'or (XAUUSD) et les indices synthétiques. **Aucun ordre ne peut partir** : l'application est en mode observation, l'arrêt des nouvelles entrées est actif, et aucun code actif ne se connecte à un compte de trading.
+TRADING INTELLIGENCE PRO est un **prototype de recherche** sur l'or (XAUUSD) et les indices synthétiques. Il est maintenant **connecté en lecture seule à un compte démo Deriv** et travaille sur de vraies données du courtier. **Aucun ordre n'a jamais été envoyé et aucun ne peut partir** : le mode observation et l'arrêt des nouvelles entrées sont actifs, l'envoi d'ordres est désactivé dans le code, et le bouton « Trading algo » du terminal est éteint.
 
-- **Solide** : sécurité, journal infalsifiable, 74 tests, intégration continue verte, IA encadrée par des plafonds de budget, deux interfaces en français.
-- **Pas prêt** : l'expérience de 14 jours en démo reste bloquée par 14 conditions (compte MT5 démo, passerelle d'exécution, horaires du courtier, etc.).
-- **Aucun avantage de trading n'est démontré.** Les profits affichés dans les exemples viennent de données artificielles.
+- **Solide** : sécurité, journal infalsifiable, 113 tests, intégration continue verte, IA encadrée par des plafonds, connexion MT5 protégée en lecture seule, fenêtres de prudence autour des annonces américaines, deux interfaces en français.
+- **Pas prêt** : l'expérience de 14 jours en démo reste bloquée par plusieurs conditions (passerelle d'exécution durable, rapprochement des ordres, arrêt d'urgence relié, etc.).
+- **Aucun avantage de trading n'est démontré, et c'est confirmé sur de vraies données** : la stratégie de base perd sur le vrai XAUUSD (voir plus bas). C'est le comportement attendu d'une règle aussi simple, pas un échec de l'application.
 
 ## Où on en est, en chiffres
 
 | Mesure | Valeur |
 | --- | --- |
-| Commits | 15, sur `main`, dépôt public |
-| Code Python | 28 modules, environ 2 900 lignes, plus 1 250 lignes de tests |
-| Tests automatiques | 74 réussis, plus un test Node de navigation |
-| Intégration continue GitHub | verte sur les derniers commits |
+| Commits | 20 sur `main`, dépôt public |
+| Code Python | 33 modules, environ 3 600 lignes, plus 2 000 lignes de tests |
+| Tests automatiques | 113 réussis, plus un test Node de navigation |
+| Intégration continue GitHub | verte sur les commits vérifiés |
 | Interfaces | 2 (aperçu local sans dépendance, version Next.js), 12 rubriques chacune |
-| Documentation | 11 documents, 32 décisions datées dans `AVANCEMENT.md` |
+| Documentation | 12 documents, 37 décisions datées dans `AVANCEMENT.md` |
 
 ## Ce que l'application fait aujourd'hui
 
 | Fonction | État | Preuve |
 | --- | --- | --- |
-| Lire des bougies (CSV, historique public Deriv) et contrôler leur qualité | Fonctionne | Essais réels sur 7 000 bougies |
-| Cycle de recherche : quatre rôles puis un directeur | Fonctionne, répond presque toujours « attente » par prudence | Tests, essais |
-| Backtests et évaluation chronologique 60/20/20 | Fonctionne sur données artificielles seulement | Tests |
-| Actualités (NewsAPI) avec tri de pertinence pour l'or | Testé en réel ; la source gratuite a 24 h de retard | 99 titres sur 100 portent sur le marché de l'or après correction |
-| Étude statistique des indices synthétiques (Volatility, Boom, Crash…) | Fonctionne sur 5 jours de données réelles | Boom : 8 sauts à la hausse, 0 à la baisse ; Crash : l'inverse |
+| Se connecter au compte démo Deriv, en lecture seule | Fonctionne | Compte démo confirmé, 10 000 $, aucun ordre |
+| Lire les contrats (XAUUSD, indices synthétiques) | Fonctionne | XAUUSD : contrat de 100 oz, lot de 0,01 à 10, stops à 20 points |
+| Exporter de vraies bougies avec l'écart réel | Fonctionne | 5 000 bougies de 5 min, écart médian 0,15 $ |
+| Contrôler la qualité des données selon les horaires du courtier | Fonctionne | Les pauses du courtier sont connues ; les autres trous restent refusés |
+| Cycle de recherche (quatre rôles et un directeur) | Fonctionne sur données réelles, répond « attente » par prudence | Essai réel |
+| Fenêtres de prudence autour des annonces américaines | Fonctionne | Emploi, inflation, prix à la production et Réserve fédérale, jusqu'en 2027 |
+| Actualités (NewsAPI) avec tri de pertinence pour l'or | Testé en réel ; source gratuite en retard de 24 h | 99 titres sur 100 portent sur l'or |
+| Étude des indices synthétiques | Fonctionne sur 5 jours de données réelles | Boom : sauts à la hausse seulement ; Crash : à la baisse |
 | Agents assistés par un modèle d'IA (`gpt-6.2-sol`) | Un essai réel plafonné a réussi | 3 appels pour 0,0075 $ |
-| Comparaison modèle contre base déterministe, notes en mémoire | Fonctionne | Tests |
-| Journal chaîné SHA-256, sauvegardes, arrêt des entrées | Fonctionne (l'arrêt est un état enregistré) | Tests, essai dans l'interface |
-| Interfaces en français, de 320 à 2 560 px de large | Vérifiées dans un navigateur | Contrôle du 18 novembre |
+| Pont d'ordres MT5 | Prêt mais **désactivé** ; choisit le bon mode d'exécution du symbole | Tests |
+| Journal chaîné, sauvegardes, arrêt des entrées | Fonctionne (l'arrêt est un état enregistré) | Tests |
 
-**Ce qu'elle ne fait pas** : trader, se connecter à MT5, recevoir un flux de cours en temps réel, surveiller le monde en continu, envoyer des alertes, ni utiliser le calendrier économique dans ses décisions.
+**Ce qu'elle ne fait pas** : envoyer un ordre, recevoir un flux de cours continu, surveiller le monde en continu, envoyer des alertes, ni utiliser un calendrier économique payant.
+
+## Résultat de la stratégie de base sur le vrai XAUUSD
+
+Moyenne mobile 5 contre 20, stop de 3 $, objectif double, écart réel du courtier, commission de 7 $ par lot et glissement de 0,10 $ (hypothèses provisoires) :
+
+| Période | Trades | Facteur de profit | Résultat |
+| --- | --- | --- | --- |
+| Tout l'échantillon (26 jours) | 294 | 0,78 | −2 019 $ sur 10 000 $ |
+| Entraînement | 173 | 0,76 | −1 364 $ |
+| Validation | 54 | 0,92 | −141 $ |
+| Test | 64 | 0,76 | −494 $ |
+
+Un facteur de profit sous 1 signifie que la règle perd de l'argent. Elle perd sur les trois périodes, donc ce n'est pas un hasard d'échantillonnage. Ce résultat est utile : il montre que les coûts réels pèsent lourd et qu'une règle de croisement simple n'a pas d'avantage. La suite est de chercher mieux, pas de la déployer.
 
 ## Ce que l'application peut apporter
 
 Dit sans exagérer, parce que le trading est risqué et que beaucoup de stratégies qui semblent gagner disparaissent une fois les coûts et le hasard pris en compte.
 
-- **Pour un particulier ou un chercheur** : un cadre pour tester une idée sur l'or ou sur des indices synthétiques **sans risquer d'argent**, avec des garde-fous (arrêt, plafonds, journal) déjà en place.
-- **Pour apprendre** : le dépôt est public, commenté en français, avec les limites de chaque résultat écrites noir sur blanc. Il montre comment encadrer une IA (budget, sortie stricte, comparaison, mémoire) plutôt que de lui faire confiance.
-- **Pour la méthode** : tout est traçable (qui a décidé quoi, avec quelles données, à quel coût), reproductible et honnête sur ses limites.
+- **Pour un particulier ou un chercheur** : un cadre pour tester une idée sur l'or ou sur des indices synthétiques **sans risquer d'argent**, avec des garde-fous (arrêt, plafonds, journal) et des données réelles du courtier.
+- **Pour apprendre** : le dépôt est public, commenté en français, avec les limites de chaque résultat écrites noir sur blanc. Il montre comment encadrer une IA et comment un résultat flatteur sur données artificielles devient négatif sur données réelles.
+- **Pour la méthode** : tout est traçable, reproductible et honnête sur ses limites.
 
 Ce que ce n'est pas : un conseil en investissement, un robot qui fait gagner de l'argent, ni une preuve de performance.
 
 ## Ce qui a été intégré
 
-- **Sécurité d'exécution** : mode observation, aucun chemin d'envoi d'ordre, intentions d'ordre uniques, résultats incertains jamais rejoués, rapprochement en lecture seule.
-- **Données** : import CSV, historique public Deriv sans compte, NewsAPI, calendrier Trading Economics (importé, pas encore utilisé).
-- **Analyse** : agents déterministes, agents assistés par modèle avec prompts figés et versionnés, comparateur, mémoire, études d'indices synthétiques avec séparation hausses et baisses.
-- **Qualité et audit** : contrôle des bougies, journal vérifiable, sauvegardes, CI GitHub.
-- **Interface** : 12 rubriques, libellés français partagés entre les deux interfaces, explications claires par page, largeur stable, test de couverture des libellés.
+- **Sécurité d'exécution** : mode observation, envoi d'ordres désactivé, intentions d'ordre uniques, résultats incertains jamais rejoués, rapprochement en lecture seule, mode d'exécution et distance des stops contrôlés sur le vrai contrat.
+- **Compte MT5 démo** : connexion en lecture seule avec liste blanche de fonctions (aucune fonction de trading atteignable), refus de tout compte non démo, mot de passe jamais affiché.
+- **Données** : bougies réelles du courtier avec écart, historique public Deriv, NewsAPI, calendrier officiel des annonces américaines.
+- **Analyse** : agents déterministes, agents assistés par modèle avec prompts figés, comparateur, mémoire, études d'indices synthétiques.
+- **Qualité et audit** : contrôle des bougies selon les horaires observés du courtier, journal vérifiable, sauvegardes, CI GitHub.
+- **Interface** : 12 rubriques, libellés français partagés, explications par page, annonces à venir, largeur stable.
 
 ## Ce qu'il reste à faire
 
 **Dépend de toi**
-1. Compte MT5 **démo** : courtier, serveur, identifiant, symboles exacts (XAUUSD et indices synthétiques), contrat, horaires, frais.
-2. Plafond de dépense côté OpenAI.
-3. Ajouter une licence au dépôt public (sans licence, personne n'a le droit de réutiliser le code).
-4. Fixer les limites de risque et choisir la stratégie à figer pour l'expérience.
+1. Activer le bouton « Trading algo » du terminal **uniquement** le jour où tu autoriseras un premier ordre démo (ce n'est pas nécessaire avant).
+2. Relever les commissions et les horaires de session auprès de Deriv ou dans le terminal (l'API ne les donne pas) ; les horaires utilisés aujourd'hui sont observés, pas confirmés.
+3. Plafond de dépense côté OpenAI.
+4. Fixer les limites de risque et décider de la stratégie à figer pour l'expérience.
 
 **Je peux le faire maintenant**
-5. Mesurer la qualité des prompts sur un jeu de cas préparés, et comparer `gpt-6-luna` à `gpt-6.2-sol`.
-6. Données XAUUSD réelles et backtest avec écart achat-vente et coûts.
-7. Frontend : composants shadcn/ui, accessibilité mesurée (lecteur d'écran, contrastes), tests automatisés.
-8. Fenêtres de prudence autour des grandes annonces (voir plus bas).
-9. Demander aux modèles de rédiger en français (le texte renvoyé par le modèle reste en anglais).
+5. Essai `order_check` à blanc : le courtier valide un ordre fictif sans l'exécuter.
+6. Chercher une stratégie qui bat les coûts sur les vraies données (la règle de base perd).
+7. Mesurer la qualité des prompts sur un jeu de cas préparés, et comparer `gpt-6-luna` à `gpt-6.2-sol`.
+8. Frontend : composants shadcn/ui, accessibilité mesurée, tests automatisés.
+9. Demander aux modèles de rédiger en français.
 
-**Gros chantiers, après le compte démo**
+**Gros chantiers, après**
 10. Passerelle MT5 durable, rapprochement après panne, arrêt d'urgence relié au programme d'exécution.
 11. Production : PostgreSQL, API NestJS, Redis, authentification avec MFA, coffre de secrets, observabilité, déploiement.
-12. Les 14 conditions de la démo, puis l'expérience de 14 jours.
+12. Les conditions de la démo, puis l'expérience de 14 jours.
 
-## Le calendrier économique est-il nécessaire ?
+## Annonces américaines et calendrier économique
 
-**Non pour démarrer, et pas en version payante pour l'instant.**
+**Décision prise : pas de calendrier économique payant.** Les annonces programmées qui comptent pour l'or (emploi, inflation, prix à la production, Réserve fédérale) sont dans `config/us_events.json`, relevées sur les calendriers officiels. Autour de chacune, une fenêtre de prudence suspend les nouvelles entrées. Personne ne les saisit chaque jour : les dates sont publiées des mois à l'avance, la plus courte série couvre jusqu'au 3 décembre 2027, la mise à jour de la Réserve fédérale est une commande automatique, et l'application alerte avant l'expiration. Détails dans [ANNONCES_US.md](ANNONCES_US.md).
 
-- **Aujourd'hui il ne sert à rien dans les décisions** : les annonces importées s'affichent, mais aucun agent, ni le directeur, ni le contrôle de risque ne les lit. Payer maintenant n'améliorerait aucune décision.
-- **Pour les indices synthétiques, il est inutile** : leurs cours ne réagissent pas aux annonces économiques.
-- **Pour XAUUSD, il a une vraie valeur de sécurité** : autour des grandes publications américaines (emploi, inflation, réunions de la Réserve fédérale), l'or bouge vite et l'écart achat-vente s'élargit. Éviter les nouvelles entrées dans ces fenêtres est une protection simple.
-- **Les dates de ces annonces sont publiques et connues à l'avance.** Une courte liste maintenue à la main (calendriers officiels des publications et de la Réserve fédérale) suffit pour une fenêtre de prudence, gratuitement.
-- **Un abonnement payant ne se justifierait que plus tard**, si on veut comparer la valeur publiée à la prévision (la « surprise »), ce qui est de l'analyse avancée.
-
-Recommandation : ne pas s'abonner, ajouter plus tard une liste locale de fenêtres de prudence reliée au contrôle de risque, et garder l'import Trading Economics en option.
+Limite honnête : une annonce **imprévue** n'est dans aucun calendrier. Elle est couverte par l'arrêt sur actualité critique, la limite d'écart et le cours périmé, ce qui réduit le risque sans le supprimer.
 
 ## Points d'attention
 
-- **Dépôt public** : aucune clé ni base de données n'est suivie, vérifié avant chaque envoi. L'adresse d'auteur Git y est visible. Prévoir une licence.
-- **Coût de l'IA** : faible (moins d'un centime par cycle de trois agents) mais non nul ; le plafond local ne remplace pas celui d'OpenAI.
+- **Dépôt public** : aucune clé ni base de données n'est suivie, vérifié avant chaque envoi. Les données du courtier restent hors de Git (licence du fournisseur).
+- **Terminal MT5** : au démarrage sans compte enregistré, il affiche une fenêtre de connexion qui bloque l'application ; il suffit de la fermer. Garder le terminal ouvert évite le problème.
+- **Coût de l'IA** : faible mais non nul ; le plafond local ne remplace pas celui d'OpenAI.
 - **Qualité de l'IA** : non mesurée. Un accord avec la base déterministe n'est pas une preuve de justesse.
-- **Données** : NewsAPI gratuit en retard de 24 h ; historique Deriv sans écart achat-vente donc inutilisable pour les coûts d'exécution.
-- **Accès** : pas encore d'authentification multi-utilisateur ni de MFA ; ne pas exposer l'API sur Internet en l'état.
-- **Incident corrigé le 18 novembre** : un test de la commande IA rechargeait le vrai `.env.local` ; il pouvait donc tenter un appel réel avec un faux nom de modèle (sans coût probable). Les tests sont maintenant étanches.
+- **Données** : NewsAPI gratuit en retard de 24 h ; échantillon de 26 jours seulement pour le backtest.
+- **Accès** : pas d'authentification multi-utilisateur ni de MFA ; ne pas exposer l'API sur Internet en l'état.

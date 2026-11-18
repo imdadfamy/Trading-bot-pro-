@@ -63,3 +63,15 @@ python -m trading_pro.cli mt5-status
 ```
 
 La commande refuse tout compte qui n'est pas **DEMO**, n'appelle aucune fonction de trading (elle est protégée par une liste de fonctions autorisées), masque l'identifiant, n'affiche jamais le mot de passe et liste XAUUSD et les indices synthétiques avec leur contrat (lot, tick, volume, écart, niveau de stops, modes d'exécution). `--select` ajoute les symboles trouvés à la liste de surveillance du terminal pour lire un cours.
+
+## Vraies bougies du compte démo (lecture seule)
+
+```powershell
+Set-Location -LiteralPath 'C:\Users\imdad\TRADING bot pro\backend'
+python -m trading_pro.cli fetch-mt5-candles XAUUSD data\xauusd_m5.csv --timeframe M5 --count 5000
+python -m trading_pro.cli --database data/trading.db import-candles data\xauusd_m5.csv
+python -m trading_pro.cli --database data/trading.db cycle data\xauusd_m5.csv
+python -m trading_pro.cli backtest data\xauusd_m5.csv
+```
+
+Les bougies du terminal sont construites sur le prix vendeur ; l'écart enregistré par barre sert à reconstruire le prix acheteur. Le décalage entre l'horloge du serveur et UTC est **mesuré** sur un cours récent (jamais supposé) ; marché fermé, il faut le donner avec `--server-utc-offset-hours`. Seules les bougies terminées sont exportées. Le fichier reste dans `backend/data/`, **ignoré par Git** : ce sont des données du courtier. Si le terminal vient d'être lancé, une fenêtre « Se connecter » peut bloquer la commande (erreur `-10005`) : la fermer sans rien saisir et relancer.

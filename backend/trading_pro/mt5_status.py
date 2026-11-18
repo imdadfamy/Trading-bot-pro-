@@ -12,7 +12,8 @@ import os
 from pathlib import Path
 
 ALLOWED = frozenset({"initialize", "login", "shutdown", "last_error", "version", "terminal_info",
-                     "account_info", "symbols_get", "symbol_info", "symbol_info_tick", "symbol_select"})
+                     "account_info", "symbols_get", "symbol_info", "symbol_info_tick", "symbol_select",
+                     "copy_rates_from_pos"})
 DEFAULT_PATTERNS = ("XAU*", "GOLD*", "*Volatility*", "*Boom*", "*Crash*", "*Step*", "*Jump*", "*Range Break*")
 DEFAULT_TERMINAL = Path(r"C:\Program Files\MetaTrader 5\terminal64.exe")
 ACCOUNT_MODES = {0: "DEMO", 1: "CONCOURS", 2: "RÉEL"}
@@ -59,20 +60,20 @@ def _symbol_row(mt5, info) -> dict:
     }
 
 
-def inspect(module, *, expected_login: int, server: str, password: str | None,
-            patterns=DEFAULT_PATTERNS, terminal_path: str | None = None, max_symbols: int = 40,
-            select_symbols: bool = False, timeout_ms: int = 20000) -> dict:
-    """Return a JSON-friendly report. Raises RuntimeError with a safe message on any refusal."""
-    mt5 = ReadOnlyMT5(module)
+def connect_demo(mt5: ReadOnlyMT5, *, expected_login: int, server: str, password: str | None,
+                 terminal_path: str | None = None, timeout_ms: int = 20000):
+    """Initialise the terminal, authenticate only if needed, and require the DEMO account. Returns the account."""
     options = {"timeout": timeout_ms}
     if terminal_path:
         options["path"] = terminal_path
-    if not mt5.initialize(**options):
+    # First a quick attach without credentials: it succeeds when the terminal is already authorised.
+    if not mt5.initialize(**{**options, "timeout": min(timeout_ms, 8000)}):
         code = mt5.last_error()[0]
-        # -6: the terminal answers but has no authorised account yet. Log in through the official API with the
-        # credentials from the server-side configuration; they are passed to MetaTrader only.
-        if code != -6 or not password:
+        # An unauthorised terminal answers -6 or waits until the timeout (-10005). Log in through the official API
+        # with the credentials from the server-side configuration; they are passed to MetaTrader only.
+        if code not in (-6, -10005) or not password:
             raise RuntimeError(f"MT5 terminal could not be initialised (code {code})")
+        mt5.shutdown()
         if not mt5.initialize(**options, login=expected_login, password=password, server=server):
             raise RuntimeError(f"MT5 login refused (code {mt5.last_error()[0]})")
     try:
@@ -85,9 +86,24 @@ def inspect(module, *, expected_login: int, server: str, password: str | None,
             account = mt5.account_info()
         if account is None or getattr(account, "login", None) != expected_login:
             raise RuntimeError("MT5 account identity mismatch")
-        mode = ACCOUNT_MODES.get(getattr(account, "trade_mode", None), "INCONNU")
         if account.trade_mode != mt5.ACCOUNT_TRADE_MODE_DEMO:
-            raise RuntimeError(f"Account is {mode}, not DEMO: inspection stopped before reading anything else")
+            mode = ACCOUNT_MODES.get(getattr(account, "trade_mode", None), "INCONNU")
+            raise RuntimeError(f"Account is {mode}, not DEMO: stopped before reading anything else")
+    except Exception:
+        mt5.shutdown()
+        raise
+    return account
+
+
+def inspect(module, *, expected_login: int, server: str, password: str | None,
+            patterns=DEFAULT_PATTERNS, terminal_path: str | None = None, max_symbols: int = 40,
+            select_symbols: bool = False, timeout_ms: int = 20000) -> dict:
+    """Return a JSON-friendly report. Raises RuntimeError with a safe message on any refusal."""
+    mt5 = ReadOnlyMT5(module)
+    account = connect_demo(mt5, expected_login=expected_login, server=server, password=password,
+                           terminal_path=terminal_path, timeout_ms=timeout_ms)
+    try:
+        mode = ACCOUNT_MODES.get(getattr(account, "trade_mode", None), "INCONNU")
         terminal = mt5.terminal_info()
         report = {
             "account": {"login_masked": _mask(account.login), "type": mode, "server": getattr(account, "server", server),

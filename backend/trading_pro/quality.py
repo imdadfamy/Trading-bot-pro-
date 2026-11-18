@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from statistics import median
+from typing import Callable
 from .market import Candle
 
 
@@ -16,7 +17,9 @@ class QualityReport:
 
 
 def assess(candles: list[Candle], as_of: datetime, *, expected_seconds: int,
-           max_age_seconds: float, max_gap_intervals: int = 0) -> QualityReport:
+           max_age_seconds: float, max_gap_intervals: int = 0,
+           explained_gap: Callable[[datetime, datetime], bool] | None = None) -> QualityReport:
+    """``explained_gap(previous_close, next_open)`` may admit planned closures; any other gap is refused."""
     if as_of.tzinfo is None or expected_seconds <= 0 or max_age_seconds <= 0 or max_gap_intervals < 0:
         raise ValueError("Invalid quality gate parameters")
     if not candles:
@@ -34,7 +37,8 @@ def assess(candles: list[Candle], as_of: datetime, *, expected_seconds: int,
     if any((c.closed_at-c.opened_at).total_seconds() != expected_seconds for c in candles):
         reasons.append("Unexpected timeframe")
     gaps = sum(max(0, round((b.opened_at-a.closed_at).total_seconds()/expected_seconds))
-               for a,b in zip(ordered, ordered[1:]))
+               for a,b in zip(ordered, ordered[1:])
+               if not (explained_gap is not None and b.opened_at > a.closed_at and explained_gap(a.closed_at, b.opened_at)))
     if any(a.closed_at > b.opened_at for a,b in zip(ordered,ordered[1:])):
         reasons.append("Overlapping candles")
     if gaps > max_gap_intervals:

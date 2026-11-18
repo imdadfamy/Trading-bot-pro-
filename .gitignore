@@ -8,3 +8,6 @@ __pycache__/
 node_modules/
 .next/
 coverage/
+# Broker market data stays local (licence of the data provider)
+backend/data/*.csv
+data/*.csv

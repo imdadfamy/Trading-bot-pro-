@@ -98,6 +98,17 @@ def main():
     mt5.add_argument("--pattern", action="append", help="Symbol name pattern such as XAU* (repeatable)")
     mt5.add_argument("--max-symbols", type=int, default=40)
     mt5.add_argument("--select", action="store_true", help="Also add the found symbols to Market Watch (to read ticks)")
+    fm = sub.add_parser("fetch-mt5-candles",
+                        help="READ-ONLY export of closed candles with the real spread from the MT5 demo account")
+    fm.add_argument("symbol", help="Exact MT5 symbol, for example XAUUSD")
+    fm.add_argument("output", help="New CSV file; refuses to overwrite unless --overwrite")
+    fm.add_argument("--timeframe", default="M5", help="M1, M5, M15, M30, H1, H4 or D1 (default M5)")
+    fm.add_argument("--count", type=int, default=5000, help="Closed bars requested (default 5000)")
+    fm.add_argument("--select", action="store_true", help="Add the symbol to Market Watch if it is not there")
+    fm.add_argument("--overwrite", action="store_true")
+    fm.add_argument("--server-utc-offset-hours", type=float, default=None,
+                    help="Broker clock offset to UTC; measured from a fresh tick when omitted")
+    fm.add_argument("--terminal-path", default=None)
     models = sub.add_parser("analyze-with-models",
                             help="One explicit model-assisted cycle: paid provider calls, budget capped, no orders")
     models.add_argument("csv", help="Closed candles, same format as the cycle command")
@@ -160,6 +171,27 @@ def main():
             refresh_module.save(path, updated)
         print(json.dumps({"written": not args.dry_run, "changes": summary, **notes,
                           "coverage": us_events.parse(updated).coverage(datetime.now(timezone.utc))}, indent=2))
+        return
+    if args.command == "fetch-mt5-candles":
+        from . import mt5_history, mt5_status
+        from .deriv_history import write_csv
+        try:
+            import MetaTrader5 as terminal_module
+        except ImportError:
+            parser.error("Package MetaTrader5 missing: python -m pip install MetaTrader5==5.0.6231")
+        try:
+            login, server, password = mt5_status.credentials_from_env()
+            default_path = str(mt5_status.DEFAULT_TERMINAL) if mt5_status.DEFAULT_TERMINAL.is_file() else None
+            candles, meta = mt5_history.fetch(terminal_module, symbol=args.symbol, timeframe=args.timeframe,
+                                              count=args.count, expected_login=login, server=server,
+                                              password=password, terminal_path=args.terminal_path or default_path,
+                                              select=args.select, utc_offset_hours=args.server_utc_offset_hours)
+            saved = write_csv(candles, args.output, overwrite=args.overwrite)
+        except (RuntimeError, ValueError, FileExistsError) as exc:
+            parser.error(str(exc))
+        print(json.dumps({"saved": str(saved), **meta, "broker": server,
+                          "note": "Bid-based bars; ask = bid + recorded spread. Market data of the broker: keep it out of Git."},
+                         indent=2))
         return
     if args.command == "mt5-status":
         from . import mt5_status
@@ -249,9 +281,10 @@ def main():
             if not candles:
                 parser.error("CSV has no candles")
             last = candles[-1]
+            from .broker_hours import schedule_for
             quality = assess(candles, last.closed_at,
                              expected_seconds=int((candles[0].closed_at-candles[0].opened_at).total_seconds()),
-                             max_age_seconds=1)
+                             max_age_seconds=1, explained_gap=schedule_for(last.symbol, last.broker))
             if not quality.accepted:
                 parser.error(f"Market quality gate failed: {', '.join(quality.reasons)}")
             relevant = [e for e in store.news_as_of(last.closed_at) if last.symbol in e["assets"]]

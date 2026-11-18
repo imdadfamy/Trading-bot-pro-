@@ -11,9 +11,10 @@ class FakeMT5:
     ACCOUNT_TRADE_MODE_DEMO = 0
     ACCOUNT_TRADE_MODE_REAL = 2
 
-    def __init__(self, *, logged_in=True, mode=0, init_ok=True, login_ok=True, auth_required=False):
+    def __init__(self, *, logged_in=True, mode=0, init_ok=True, login_ok=True, auth_required=False, auth_code=-6):
         self.logged_in, self.mode, self.init_ok, self.login_ok = logged_in, mode, init_ok, login_ok
-        self.auth_required, self.calls, self.login_args, self.error = auth_required, [], None, (-6, "Authorization failed")
+        self.auth_required, self.auth_code = auth_required, auth_code
+        self.calls, self.login_args, self.error = [], None, (-6, "Authorization failed")
 
     def _log(self, name):
         self.calls.append(name)
@@ -25,7 +26,7 @@ class FakeMT5:
             return False
         if self.auth_required:
             if "password" not in kwargs:
-                self.error = (-6, "Authorization failed")
+                self.error = (self.auth_code, "Authorization failed" if self.auth_code == -6 else "IPC timeout")
                 return False
             self.login_args = (kwargs.get("login"), kwargs["password"], kwargs.get("server"))
             self.logged_in = self.login_ok
@@ -147,10 +148,17 @@ class Mt5StatusTests(unittest.TestCase):
         self.assertIn("-6", str(caught.exception))
         with self.assertRaises(RuntimeError):  # no password configured: never guess, stop
             inspect(FakeMT5(logged_in=False, auth_required=True), expected_login=LOGIN, server=SERVER, password=None)
-        timeout = FakeMT5(init_ok=False)  # a timeout is not an authorisation problem: no credentials sent
+        waiting = FakeMT5(logged_in=False, auth_required=True, auth_code=-10005)  # unauthorised terminal waits for the timeout
+        self.assertTrue(run(waiting)["demo_verified"])
+        self.assertEqual(waiting.login_args, (LOGIN, PASSWORD, SERVER))
+        dead = FakeMT5(init_ok=False)  # terminal that never answers, even with credentials
+        with self.assertRaises(RuntimeError) as dead_error:
+            run(dead)
+        self.assertNotIn(PASSWORD, str(dead_error.exception))
+        silent = FakeMT5(init_ok=False)  # no password configured: never retried with anything
         with self.assertRaises(RuntimeError):
-            run(timeout)
-        self.assertIsNone(timeout.login_args)
+            inspect(silent, expected_login=LOGIN, server=SERVER, password=None)
+        self.assertEqual(silent.calls.count("initialize"), 1)
 
     def test_initialisation_failure_and_market_watch_selection_option(self):
         with self.assertRaises(RuntimeError):
