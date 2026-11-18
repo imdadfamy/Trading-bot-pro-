@@ -13,6 +13,35 @@ from .backup import backup_database, verify_backup
 from datetime import datetime
 
 
+def _model_cycle(args, parser, store, candles, critical, verified_urls):
+    """Explicit, budget-capped model run. Fails before any network call if configuration is incomplete."""
+    from dataclasses import replace
+    from .ai_orchestrator import analyze_with_models
+    from .openai_provider import provider_from_env
+    from .service import Service
+    try:
+        provider = provider_from_env()
+    except ValueError as exc:
+        parser.error(str(exc))
+    last = candles[-1]
+    service = Service(args.database)
+    configured = service.settings()["settings"]["model_by_agent"]
+    agents = tuple(name.strip() for name in args.agents.split(",") if name.strip())
+    models = {name: (args.model or configured.get(name, "")) for name in agents}
+    budget = replace(service.model_budget(), max_call_usd=args.max_call_usd)
+    headlines = [{"headline": e["headline"], "source": e["source"], "status": e["status"],
+                  "relevance": e.get("relevance", "unclassified"), "published_at": e["published_at"]}
+                 for e in store.news_as_of(last.closed_at)
+                 if e.get("relevance") in ("medium", "high")][-10:]
+    try:
+        return analyze_with_models(store, provider, symbol=last.symbol, broker=last.broker, bid=last.bid,
+                                   ask=last.ask, closed_prices=[c.close for c in candles], headlines=headlines,
+                                   models=models, budget=budget, agents=agents, source_urls=verified_urls,
+                                   critical_event=critical, observed_at=last.closed_at)
+    except ValueError as exc:
+        parser.error(str(exc))
+
+
 def main():
     from .local_env import load_local_env
     load_local_env()
@@ -46,6 +75,12 @@ def main():
     deriv.add_argument("--granularity", type=int, default=60, help="Seconds per candle: 60, 300, 3600...")
     deriv.add_argument("--count", type=int, default=1000, help="Candles requested, 2 to 5000")
     deriv.add_argument("--overwrite", action="store_true")
+    models = sub.add_parser("analyze-with-models",
+                            help="One explicit model-assisted cycle: paid provider calls, budget capped, no orders")
+    models.add_argument("csv", help="Closed candles, same format as the cycle command")
+    models.add_argument("--agents", default="graph,news,quant", help="Comma list among graph, news, quant")
+    models.add_argument("--model", help="Model name for every chosen agent (default: versioned settings)")
+    models.add_argument("--max-call-usd", type=float, default=0.05, help="Hard cap for one call (default 0.05)")
     backtest = sub.add_parser("backtest")
     backtest.add_argument("csv")
     backtest.add_argument("--report", help="Optional JSON output path")
@@ -146,9 +181,12 @@ def main():
             relevant = [e for e in store.news_as_of(last.closed_at) if last.symbol in e["assets"]]
             critical = any(e["severity"] == "critical" and e["status"] != "retracted" for e in relevant)
             verified_urls = tuple(e["url"] for e in relevant if e["status"] == "confirmed")
-            result = analyze(store, symbol=last.symbol, broker=last.broker, bid=last.bid,
-                             ask=last.ask, closed_prices=[c.close for c in candles],
-                             observed_at=last.closed_at, critical_event=critical, source_urls=verified_urls)
+            if args.command == "analyze-with-models":
+                result = _model_cycle(args, parser, store, candles, critical, verified_urls)
+            else:
+                result = analyze(store, symbol=last.symbol, broker=last.broker, bid=last.bid,
+                                 ask=last.ask, closed_prices=[c.close for c in candles],
+                                 observed_at=last.closed_at, critical_event=critical, source_urls=verified_urls)
     print(json.dumps(result, default=lambda x: asdict(x) if hasattr(x, "__dataclass_fields__") else str(x), indent=2))
 
 

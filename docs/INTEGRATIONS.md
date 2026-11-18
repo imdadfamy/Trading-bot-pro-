@@ -3,7 +3,7 @@
 | Domaine | Adaptateur prévu | Informations indispensables | État |
 | --- | --- | --- | --- |
 | Broker XAUUSD | Terminal MT5 Windows, passerelle sortante | Courtier, compte DEMO, serveur, contrat, taille/valeur tick, commissions, heures, politiques stops et filling | Non connecté |
-| Modèles IA | Interface `Provider` avec sorties JSON strictes | Fournisseur, clé côté serveur, modèle/version, plafond par appel et tarifs vérifiés | Aucune requête externe |
+| Modèles IA | Interface `Provider` avec sorties JSON strictes | Fournisseur, clé côté serveur, modèle/version, plafond par appel et tarifs vérifiés | Adaptateur, prompts figés et orchestration prêts (`analyze-with-models`) ; jamais testé avec une vraie clé ni des tarifs vérifiés |
 | Actualités | Sources officielles, fournisseur sous licence | Accès, droits de conservation, latence, couverture, schémas d'alertes/rétractations | Import JSON local seulement |
 | Calendrier économique | API sous licence | Consensus point-in-time, révisions, heures UTC et embargo | Non connecté |
 | Intermarket | API de marché licenciée | DXY, rendements, futures, fréquence, fuseaux, coûts | Non connecté |

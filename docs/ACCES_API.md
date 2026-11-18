@@ -19,6 +19,8 @@ Les liens ci-dessous pointent vers les sites officiels. Vérifier le tarif, la l
 
 ## Où placer les clés
 
+Pour les agents IA, renseigner aussi `TIP_OPENAI_INPUT_USD_PER_M` et `TIP_OPENAI_OUTPUT_USD_PER_M` (prix en dollars par million de jetons, **copiés depuis la grille tarifaire officielle du modèle choisi**). Aucun tarif n'est supposé : sans ces deux valeurs, `analyze-with-models` refuse de démarrer, sans appel réseau.
+
 Ouvrir [`.env.local`](../.env.local) à la racine du projet et remplir les valeurs après `=`. Le fichier est ignoré par Git et lu automatiquement au lancement de l'API locale, de l'adaptateur FastAPI et de la CLI. Les variables déjà définies dans le processus ont priorité. Ne jamais placer ces valeurs dans `web/.env.local`, dans une variable `NEXT_PUBLIC_*` ou dans un message. `Start-Local.ps1` génère sa propre clé opérateur temporaire.
 
 ## Essai local après avoir renseigné `.env.local`
@@ -33,3 +35,14 @@ python -m trading_pro.cli --database data/trading.db poll-newsapi
 Cette commande importe des titres comme événements **non confirmés**, sans attribution automatique à XAUUSD et sans envoi d'ordre. Ne pas lancer cette commande avec une clé de développement en pensant obtenir du temps réel. L'état `/readiness` affiche seulement si des accès sont renseignés, jamais leur valeur ; il reste bloqué pour les 14 jours tant que les connexions et les essais du compte démo ne sont pas validés.
 
 La commande `python -m trading_pro.cli --database data/trading.db poll-calendar` lit une fois le calendrier américain via `TIP_TRADING_ECONOMICS_KEY`, si son contrat le permet. Elle conserve les versions reçues pour éviter de réécrire le passé ; elle ne lance aucun ordre ni surveillance continue.
+
+## Analyse assistée par modèles (appel facturé, explicite)
+
+Après avoir renseigné la clé et les deux tarifs, choisi un modèle par agent dans **Paramètres** (ou `--model`) et fixé des plafonds modestes :
+
+```powershell
+Set-Location -LiteralPath 'C:\Users\imdad\TRADING bot pro\backend'
+python -m trading_pro.cli --database data/trading.db analyze-with-models ..\examples\synthetic_xauusd.csv --model NOM_DU_MODELE --max-call-usd 0.05
+```
+
+La commande lance au plus un appel par agent choisi (`graph`, `news`, `quant`), chacun borné par le plafond par appel, le plafond quotidien et le plafond de l'expérience. Elle ne lance aucun ordre. Configurer aussi un plafond de dépense côté OpenAI : le plafond local n'est pas une garantie de facturation.
