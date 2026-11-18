@@ -29,6 +29,7 @@ class Snapshot:
     critical_event: bool = False
     event_confirmed: bool = False
     source_urls: tuple[str, ...] = ()
+    halt_reason: str = ""  # why new entries are suspended (scheduled announcement, critical news...)
 
     def __post_init__(self):
         if (self.observed_at.tzinfo is None or not all(isfinite(x) for x in (self.bid, self.ask))
@@ -79,7 +80,7 @@ class Director:
         action = Action.WAIT
         reason = "Insufficient or conflicting independent analyses"
         if snapshot.critical_event:
-            reason = "Critical event: suspend new entries"
+            reason = snapshot.halt_reason or "Critical event: suspend new entries"
         elif names == required and len(reports) == 4 and len(choices) == 1:
             action = next(iter(choices))
             reason = "Agreement across all four agents; deterministic risk check still required"
@@ -134,7 +135,8 @@ class RiskDecision:
 
 
 def check_risk(signal: Signal, quote: Snapshot, instrument: Instrument,
-               state: RiskState, limits: Limits, now: datetime | None = None) -> RiskDecision:
+               state: RiskState, limits: Limits, now: datetime | None = None,
+               announcement_halt: str | None = None) -> RiskDecision:
     now = now or utcnow()
     def reject(reason: str) -> RiskDecision:
         return RiskDecision(False, reason)
@@ -142,6 +144,8 @@ def check_risk(signal: Signal, quote: Snapshot, instrument: Instrument,
         return reject("Demo-only execution disabled or broker unavailable")
     if signal.action == Action.WAIT:
         return reject("WAIT cannot execute")
+    if announcement_halt:
+        return reject(announcement_halt)
     if signal.status != "validated":
         return reject("Signal is not validated")
     numeric = (state.equity, state.daily_start_equity, state.open_risk, state.ai_spend,
@@ -163,7 +167,7 @@ def check_risk(signal: Signal, quote: Snapshot, instrument: Instrument,
     if age < -1 or age > limits.max_quote_age_seconds:
         return reject("Quote stale or clock out of sync")
     if quote.critical_event:
-        return reject("Critical event")
+        return reject(quote.halt_reason or "Critical event")
     if quote.ask - quote.bid > limits.max_spread:
         return reject("Spread too wide")
     if state.ai_spend >= limits.max_ai_spend:

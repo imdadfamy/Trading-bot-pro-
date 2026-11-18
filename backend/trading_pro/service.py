@@ -115,6 +115,13 @@ class Service:
             return {"metrics": None, "reason": "No validated demo fills or equity snapshots"}
         if path == "/backtests":
             return self.store.backtests()
+        if path == "/announcements":
+            from . import us_events
+            from .core import utcnow
+            try:
+                return us_events.describe(us_events.load(), utcnow())
+            except FileNotFoundError:
+                return {"configured": False, "upcoming": [], "coverage": {}, "halt_reason": None, "blackout": None}
         if path == "/synthetic/reports":
             return self.store.synthetic_reports()
         if path == "/experiments":

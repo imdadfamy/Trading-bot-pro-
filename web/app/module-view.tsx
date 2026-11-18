@@ -43,6 +43,22 @@ function tiles(row: Row, keys: string[]) {
     return <div className="detail" key={key}><span>{label}</span><strong>{(formatters[key] ?? show)(row[key])}</strong></div>;
   })}</div>;
 }
+function Announcements({ data }: { data: Row }) {
+  const upcoming = Array.isArray(data.upcoming) ? data.upcoming.filter(isRow) : [];
+  const coverage = isRow(data.coverage) ? data.coverage : {};
+  const blackout = isRow(data.blackout) ? data.blackout : null;
+  const weak = Object.values(coverage).some(c => isRow(c) && c.status !== "ok");
+  const days = (iso: unknown) => { const delta = Math.round((new Date(String(iso)).getTime() - Date.now()) / 86400000); return delta <= 0 ? "aujourd'hui" : `dans ${delta} j`; };
+  return <>
+    <h3 className="subhead">Annonces américaines programmées</h3>
+    <p className="hint">Dans la fenêtre indiquée autour de chaque annonce, aucune nouvelle entrée n'est autorisée. Les annonces imprévues ne figurent dans aucun calendrier : elles sont couvertes par l'arrêt sur actualité critique et la limite d'écart.</p>
+    {blackout ? <div className="alert">Fenêtre de prudence active : {fr("usKinds", blackout.kind)}, jusqu'à {when(blackout.until_utc)}.</div> : <p className="hint">Aucune fenêtre de prudence en ce moment.</p>}
+    {weak && <div className="alert">Le calendrier des annonces expire bientôt ou est périmé. Mettre à jour avec « refresh-us-events » (voir la documentation).</div>}
+    <div className="items">{upcoming.length ? upcoming.map((e, i) => <Item key={i} title={`${fr("usKinds", e.kind)} · ${when(e.at_utc)}`} tag={days(e.at_utc).toUpperCase()}><span>Fenêtre de prudence : {when(e.window_start_utc)} → {when(e.window_end_utc)}</span></Item>) : <Empty>Aucune annonce à venir dans le calendrier</Empty>}</div>
+    <h3 className="subhead">Validité du calendrier</h3>
+    <div className="items">{Object.entries(coverage).map(([kind, c]) => { const r = isRow(c) ? c : {}; return <Item key={kind} title={fr("usKinds", kind)} tag={fr("coverage", r.status).toUpperCase()}><span>dernière date connue : {show(r.last_event)}</span></Item>; })}</div>
+  </>;
+}
 function Empty({ children }: { children: string }) { return <div className="empty-small">{children}</div>; }
 function Item({ title, children, tag }: { title: string; children?: React.ReactNode; tag?: string }) {
   return <div className="item"><strong>{title}</strong>{children}{tag && <em>{tag}</em>}</div>;
@@ -50,11 +66,17 @@ function Item({ title, children, tag }: { title: string; children?: React.ReactN
 export default function ModuleView({ page }: { page: string }) {
   const [value, setValue] = useState<unknown>(null);
   const [studies, setStudies] = useState<unknown[]>([]);
+  const [announce, setAnnounce] = useState<unknown>(null);
   const [error, setError] = useState(false);
   const [loading, setLoading] = useState(true);
   useEffect(() => {
     const controller = new AbortController();
-    setLoading(true); setError(false); setValue(null); setStudies([]);
+    setLoading(true); setError(false); setValue(null); setStudies([]); setAnnounce(null);
+    if (page === "Session Analytics") {
+      fetch(base + "/announcements", { cache: "no-store", signal: controller.signal })
+        .then(r => (r.ok ? r.json() : null)).then(result => { if (!controller.signal.aborted && isRow(result)) setAnnounce(result); })
+        .catch(() => undefined);
+    }
     if (page === "Strategy Lab") {
       fetch(base + "/synthetic/reports", { cache: "no-store", signal: controller.signal })
         .then(r => (r.ok ? r.json() : [])).then(result => { if (!controller.signal.aborted && Array.isArray(result)) setStudies(result); })
@@ -86,6 +108,7 @@ export default function ModuleView({ page }: { page: string }) {
       </>}
       {page === "AI Memory" && <div className="items">{list.length ? rows(list).map((r, i) => <Item key={i} title={show(r.cause)}><span>{show(r.recommendation)}</span></Item>) : <Empty>Aucune observation enregistrée</Empty>}</div>}
       {page === "Session Analytics" && isRow(value) && tiles(value, ["as_of", "active", "primary", "broker_hours_verified"])}
+      {page === "Session Analytics" && isRow(announce) && <Announcements data={announce}/>}
       {page === "Budget Center" && isRow(value) && tiles(value, ["total_usd", "today_usd", "daily_limit_usd", "experiment_limit_usd", "calls", "new_model_calls_blocked"])}
       {page === "Risk Center" && isRow(value) && tiles(value, ["kill_switch", "broker", "pending_order_intents", "live_trading", "mode"])}
       {page === "API & Integrations" && isRow(value) && <>

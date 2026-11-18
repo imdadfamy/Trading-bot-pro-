@@ -33,7 +33,8 @@ FALLBACKS = {
 def analyze_with_models(store: ResearchStore, provider: Provider, *, symbol: str, broker: str, bid: float,
                         ask: float, closed_prices: list[float], headlines: list[dict] | None,
                         models: dict[str, str], budget: Budget, agents=MODEL_AGENTS,
-                        source_urls: tuple[str, ...] = (), critical_event: bool = False, observed_at=None):
+                        source_urls: tuple[str, ...] = (), critical_event: bool = False, observed_at=None,
+                        halt_reason: str = ""):
     agents = tuple(agents)
     if not agents or set(agents) - set(MODEL_AGENTS):
         raise ValueError("Model agents must be chosen among graph, news and quant")
@@ -45,8 +46,11 @@ def analyze_with_models(store: ResearchStore, provider: Provider, *, symbol: str
         raise ValueError("Provider must project the cost of each call before it is made")
 
     cycle_id = str(uuid4())
-    quote = Snapshot(cycle_id, symbol, bid, ask, observed_at or utcnow(), broker, critical_event, False, source_urls)
+    quote = Snapshot(cycle_id, symbol, bid, ask, observed_at or utcnow(), broker, critical_event, False, source_urls,
+                     halt_reason)
     store.snapshot(quote)
+    if halt_reason:
+        store.journal.log("announcement.blackout", cycle_id, {"reason": halt_reason})
     baseline = {"graph": graph_agent(closed_prices), "news": news_agent(quote),
                 "quant": quant_agent(closed_prices), "risk": risk_agent()}
     final = dict(baseline)

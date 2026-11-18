@@ -1,0 +1,487 @@
+{
+  "schema": 1,
+  "retrieved_on": "2026-11-18",
+  "note": "Scheduled US announcements only. Official sources below; refresh with the refresh-us-events command.",
+  "sources": {
+    "NFP": "https://www.bls.gov/schedule/news_release/empsit.htm",
+    "CPI": "https://www.bls.gov/schedule/news_release/cpi.htm",
+    "PPI": "https://www.bls.gov/schedule/news_release/ppi.htm",
+    "FOMC": "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm"
+  },
+  "names": {
+    "NFP": "Emploi américain (Non-Farm Payrolls)",
+    "CPI": "Inflation américaine (CPI)",
+    "PPI": "Prix à la production américains (PPI)",
+    "FOMC": "Décision de la Réserve fédérale (FOMC)"
+  },
+  "windows": {
+    "NFP": {
+      "before": 30,
+      "after": 60
+    },
+    "CPI": {
+      "before": 30,
+      "after": 60
+    },
+    "PPI": {
+      "before": 15,
+      "after": 30
+    },
+    "FOMC": {
+      "before": 30,
+      "after": 90
+    }
+  },
+  "events": [
+    {
+      "kind": "NFP",
+      "date": "2026-01-09",
+      "time_et": "08:30"
+    },
+    {
+      "kind": "CPI",
+      "date": "2026-01-13",
+      "time_et": "08:30"
+    },
+    {
+      "kind": "PPI",
+      "date": "2026-01-14",
+      "time_et": "08:30"
+    },
+    {
+      "kind": "FOMC",
+      "date": "2026-01-28",
+      "time_et": "14:00"
+    },
+    {
+      "kind": "PPI",
+      "date": "2026-01-30",
+      "time_et": "08:30"
+    },
+    {
+      "kind": "NFP",
+      "date": "2026-02-11",
+      "time_et": "08:30"
+    },
+    {
+      "kind": "CPI",
+      "date": "2026-02-13",
+      "time_et": "08:30"
+    },
+    {
+      "kind": "PPI",
+      "date": "2026-02-27",
+      "time_et": "08:30"
+    },
+    {
+      "kind": "NFP",
+      "date": "2026-03-06",
+      "time_et": "08:30"
+    },
+    {
+      "kind": "CPI",
+      "date": "2026-03-11",
+      "time_et": "08:30"
+    },
+    {
+      "kind": "PPI",
+      "date": "2026-03-18",
+      "time_et": "08:30"
+    },
+    {
+      "kind": "FOMC",
+      "date": "2026-03-18",
+      "time_et": "14:00"
+    },
+    {
+      "kind": "NFP",
+      "date": "2026-04-03",
+      "time_et": "08:30"
+    },
+    {
+      "kind": "CPI",
+      "date": "2026-04-10",
+      "time_et": "08:30"
+    },
+    {
+      "kind": "PPI",
+      "date": "2026-04-14",
+      "time_et": "08:30"
+    },
+    {
+      "kind": "FOMC",
+      "date": "2026-04-29",
+      "time_et": "14:00"
+    },
+    {
+      "kind": "NFP",
+      "date": "2026-05-08",
+      "time_et": "08:30"
+    },
+    {
+      "kind": "CPI",
+      "date": "2026-05-12",
+      "time_et": "08:30"
+    },
+    {
+      "kind": "PPI",
+      "date": "2026-05-13",
+      "time_et": "08:30"
+    },
+    {
+      "kind": "NFP",
+      "date": "2026-06-05",
+      "time_et": "08:30"
+    },
+    {
+      "kind": "CPI",
+      "date": "2026-06-10",
+      "time_et": "08:30"
+    },
+    {
+      "kind": "PPI",
+      "date": "2026-06-11",
+      "time_et": "08:30"
+    },
+    {
+      "kind": "FOMC",
+      "date": "2026-06-17",
+      "time_et": "14:00"
+    },
+    {
+      "kind": "NFP",
+      "date": "2026-07-02",
+      "time_et": "08:30"
+    },
+    {
+      "kind": "CPI",
+      "date": "2026-07-14",
+      "time_et": "08:30"
+    },
+    {
+      "kind": "PPI",
+      "date": "2026-07-15",
+      "time_et": "08:30"
+    },
+    {
+      "kind": "FOMC",
+      "date": "2026-07-29",
+      "time_et": "14:00"
+    },
+    {
+      "kind": "NFP",
+      "date": "2026-08-07",
+      "time_et": "08:30"
+    },
+    {
+      "kind": "CPI",
+      "date": "2026-08-12",
+      "time_et": "08:30"
+    },
+    {
+      "kind": "PPI",
+      "date": "2026-08-13",
+      "time_et": "08:30"
+    },
+    {
+      "kind": "NFP",
+      "date": "2026-09-04",
+      "time_et": "08:30"
+    },
+    {
+      "kind": "PPI",
+      "date": "2026-09-10",
+      "time_et": "08:30"
+    },
+    {
+      "kind": "CPI",
+      "date": "2026-09-11",
+      "time_et": "08:30"
+    },
+    {
+      "kind": "FOMC",
+      "date": "2026-09-16",
+      "time_et": "14:00"
+    },
+    {
+      "kind": "NFP",
+      "date": "2026-10-02",
+      "time_et": "08:30"
+    },
+    {
+      "kind": "CPI",
+      "date": "2026-10-14",
+      "time_et": "08:30"
+    },
+    {
+      "kind": "PPI",
+      "date": "2026-10-15",
+      "time_et": "08:30"
+    },
+    {
+      "kind": "FOMC",
+      "date": "2026-10-28",
+      "time_et": "14:00"
+    },
+    {
+      "kind": "NFP",
+      "date": "2026-11-06",
+      "time_et": "08:30"
+    },
+    {
+      "kind": "CPI",
+      "date": "2026-11-10",
+      "time_et": "08:30"
+    },
+    {
+      "kind": "PPI",
+      "date": "2026-11-13",
+      "time_et": "08:30"
+    },
+    {
+      "kind": "NFP",
+      "date": "2026-12-04",
+      "time_et": "08:30"
+    },
+    {
+      "kind": "FOMC",
+      "date": "2026-12-09",
+      "time_et": "14:00"
+    },
+    {
+      "kind": "CPI",
+      "date": "2026-12-10",
+      "time_et": "08:30"
+    },
+    {
+      "kind": "PPI",
+      "date": "2026-12-15",
+      "time_et": "08:30"
+    },
+    {
+      "kind": "NFP",
+      "date": "2027-01-08",
+      "time_et": "08:30"
+    },
+    {
+      "kind": "CPI",
+      "date": "2027-01-13",
+      "time_et": "08:30"
+    },
+    {
+      "kind": "PPI",
+      "date": "2027-01-14",
+      "time_et": "08:30"
+    },
+    {
+      "kind": "FOMC",
+      "date": "2027-01-27",
+      "time_et": "14:00"
+    },
+    {
+      "kind": "NFP",
+      "date": "2027-02-05",
+      "time_et": "08:30"
+    },
+    {
+      "kind": "CPI",
+      "date": "2027-02-11",
+      "time_et": "08:30"
+    },
+    {
+      "kind": "PPI",
+      "date": "2027-02-12",
+      "time_et": "08:30"
+    },
+    {
+      "kind": "NFP",
+      "date": "2027-03-05",
+      "time_et": "08:30"
+    },
+    {
+      "kind": "CPI",
+      "date": "2027-03-10",
+      "time_et": "08:30"
+    },
+    {
+      "kind": "PPI",
+      "date": "2027-03-12",
+      "time_et": "08:30"
+    },
+    {
+      "kind": "FOMC",
+      "date": "2027-03-17",
+      "time_et": "14:00"
+    },
+    {
+      "kind": "NFP",
+      "date": "2027-04-02",
+      "time_et": "08:30"
+    },
+    {
+      "kind": "CPI",
+      "date": "2027-04-13",
+      "time_et": "08:30"
+    },
+    {
+      "kind": "PPI",
+      "date": "2027-04-14",
+      "time_et": "08:30"
+    },
+    {
+      "kind": "FOMC",
+      "date": "2027-04-28",
+      "time_et": "14:00"
+    },
+    {
+      "kind": "NFP",
+      "date": "2027-05-07",
+      "time_et": "08:30"
+    },
+    {
+      "kind": "CPI",
+      "date": "2027-05-12",
+      "time_et": "08:30"
+    },
+    {
+      "kind": "PPI",
+      "date": "2027-05-13",
+      "time_et": "08:30"
+    },
+    {
+      "kind": "NFP",
+      "date": "2027-06-04",
+      "time_et": "08:30"
+    },
+    {
+      "kind": "FOMC",
+      "date": "2027-06-09",
+      "time_et": "14:00"
+    },
+    {
+      "kind": "CPI",
+      "date": "2027-06-10",
+      "time_et": "08:30"
+    },
+    {
+      "kind": "PPI",
+      "date": "2027-06-11",
+      "time_et": "08:30"
+    },
+    {
+      "kind": "NFP",
+      "date": "2027-07-02",
+      "time_et": "08:30"
+    },
+    {
+      "kind": "CPI",
+      "date": "2027-07-14",
+      "time_et": "08:30"
+    },
+    {
+      "kind": "PPI",
+      "date": "2027-07-15",
+      "time_et": "08:30"
+    },
+    {
+      "kind": "FOMC",
+      "date": "2027-07-28",
+      "time_et": "14:00"
+    },
+    {
+      "kind": "NFP",
+      "date": "2027-08-06",
+      "time_et": "08:30"
+    },
+    {
+      "kind": "PPI",
+      "date": "2027-08-10",
+      "time_et": "08:30"
+    },
+    {
+      "kind": "CPI",
+      "date": "2027-08-11",
+      "time_et": "08:30"
+    },
+    {
+      "kind": "NFP",
+      "date": "2027-09-03",
+      "time_et": "08:30"
+    },
+    {
+      "kind": "PPI",
+      "date": "2027-09-10",
+      "time_et": "08:30"
+    },
+    {
+      "kind": "CPI",
+      "date": "2027-09-14",
+      "time_et": "08:30"
+    },
+    {
+      "kind": "FOMC",
+      "date": "2027-09-15",
+      "time_et": "14:00"
+    },
+    {
+      "kind": "NFP",
+      "date": "2027-10-08",
+      "time_et": "08:30"
+    },
+    {
+      "kind": "CPI",
+      "date": "2027-10-14",
+      "time_et": "08:30"
+    },
+    {
+      "kind": "PPI",
+      "date": "2027-10-15",
+      "time_et": "08:30"
+    },
+    {
+      "kind": "FOMC",
+      "date": "2027-10-27",
+      "time_et": "14:00"
+    },
+    {
+      "kind": "NFP",
+      "date": "2027-11-05",
+      "time_et": "08:30"
+    },
+    {
+      "kind": "CPI",
+      "date": "2027-11-10",
+      "time_et": "08:30"
+    },
+    {
+      "kind": "PPI",
+      "date": "2027-11-12",
+      "time_et": "08:30"
+    },
+    {
+      "kind": "FOMC",
+      "date": "2027-11-17",
+      "time_et": "14:00"
+    },
+    {
+      "kind": "NFP",
+      "date": "2027-12-03",
+      "time_et": "08:30"
+    },
+    {
+      "kind": "CPI",
+      "date": "2027-12-10",
+      "time_et": "08:30"
+    },
+    {
+      "kind": "PPI",
+      "date": "2027-12-15",
+      "time_et": "08:30"
+    },
+    {
+      "kind": "FOMC",
+      "date": "2028-01-26",
+      "time_et": "14:00"
+    }
+  ]
+}

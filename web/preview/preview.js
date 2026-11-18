@@ -123,7 +123,19 @@ async function generic(page,sequence) {
     else studies.forEach(item=>{const r=item.report||{};const f=r.all?.absolute_jump_frequency;append(study,row([`${item.symbol} · ${fr("families",item.family)}`,`${value(r.all?.observations)} bougies · ${value(r.all?.absolute_jump_count)} sauts brusques (${f===null||f===undefined?"—":(Math.round(f*10000)/100).toLocaleString("fr-FR")} %) : ${value(r.all?.up_jump_count)} à la hausse, ${value(r.all?.down_jump_count)} à la baisse`,r.statistically_sufficient?"ÉCHANTILLON SUFFISANT":"ÉCHANTILLON INSUFFISANT"]));});
     append(content,study);
   }
-  if(page==="Session Analytics") {const panel=card("Sessions indicatives");labeled(panel,{session_principale:data.primary,sessions_actives:data.active,horaires_courtier_vérifiés:data.broker_hours_verified,évalué_le:when(data.as_of)});append(content,panel);}
+  if(page==="Session Analytics") {
+    const panel=card("Sessions indicatives");labeled(panel,{session_principale:data.primary,sessions_actives:data.active,horaires_courtier_vérifiés:data.broker_hours_verified,évalué_le:when(data.as_of)});append(content,panel);
+    const ann=await get("/announcements").catch(()=>null);if(sequence!==renderSequence)return;
+    if(ann){
+      append(content,info("Dans la fenêtre indiquée autour de chaque annonce américaine programmée, aucune nouvelle entrée n'est autorisée. Les annonces imprévues ne figurent dans aucun calendrier : elles sont couvertes par l'arrêt sur actualité critique et la limite d'écart."));
+      if(ann.blackout)append(content,info(`Fenêtre de prudence active : ${fr("usKinds",ann.blackout.kind)}, jusqu'à ${when(ann.blackout.until_utc)}.`,true));
+      if(Object.values(ann.coverage||{}).some(c=>c.status!=="ok"))append(content,info("Le calendrier des annonces expire bientôt ou est périmé. Mettre à jour avec « refresh-us-events » (voir la documentation).",true));
+      const list=card("Annonces américaines programmées");
+      (ann.upcoming||[]).forEach(e=>{const d=Math.round((new Date(e.at_utc).getTime()-Date.now())/86400000);append(list,row([`${fr("usKinds",e.kind)} · ${when(e.at_utc)}`,`Fenêtre de prudence : ${when(e.window_start_utc)} → ${when(e.window_end_utc)}`,d<=0?"AUJOURD'HUI":`DANS ${d} J`]));});
+      if(!(ann.upcoming||[]).length)append(list,empty("Aucune annonce à venir dans le calendrier"));append(content,list);
+      const valid=card("Validité du calendrier");Object.entries(ann.coverage||{}).forEach(([kind,c])=>append(valid,row([fr("usKinds",kind),`dernière date connue : ${value(c.last_event)}`,fr("coverage",c.status).toUpperCase()])));append(content,valid);
+    }
+  }
   if(page==="Budget Center") {const panel=card("Coûts IA enregistrés");labeled(panel,{dépense_totale_usd:data.total_usd,dépense_du_jour_usd:data.today_usd,plafond_quotidien_usd:data.daily_limit_usd,plafond_expérience_usd:data.experiment_limit_usd,appels:data.calls,nouveaux_appels_bloqués:data.new_model_calls_blocked});append(content,panel);}
   if(page==="Risk Center") {const panel=card("Contrôle du risque");labeled(panel,{arrêt_des_nouvelles_entrées:data.kill_switch?"ACTIF":"INCONNU",courtier:fr("values",data.broker),mode:fr("values",data.mode),ordres_à_vérifier_à_la_main:data.pending_order_intents,trading_réel_autorisé:data.live_trading});append(panel,info("Le bouton d’arrêt se trouve en haut de chaque écran. La liaison au worker MT5 reste à intégrer.",true));append(content,panel);}
   if(page==="API & Integrations") {

@@ -101,6 +101,11 @@ def backtests():
     return service.read("/backtests")
 
 
+@app.get("/announcements")
+def announcements():
+    return service.read("/announcements")
+
+
 @app.get("/synthetic/reports")
 def synthetic_reports():
     return service.read("/synthetic/reports")

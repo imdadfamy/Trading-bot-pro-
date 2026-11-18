@@ -49,6 +49,7 @@
     "none": "Aucun"
   },
   "events": {
+    "announcement.blackout": "Fenêtre de prudence : annonce américaine",
     "backtest.completed": "Backtest terminé",
     "budget.exceeded": "Budget IA dépassé",
     "calendar.received": "Calendrier économique reçu",
@@ -141,12 +142,17 @@
     "Call cost above configured cap": "Coût de l'appel au-dessus du plafond configuré.",
     "Model budget exhausted": "Budget IA épuisé.",
     "Actual model cost exceeded budget": "Coût réel au-dessus du budget.",
-    "Provider unavailable or invalid structured output": "Modèle indisponible ou réponse invalide."
+    "Provider unavailable or invalid structured output": "Modèle indisponible ou réponse invalide.",
+    "US announcement calendar missing or expired": "Calendrier des annonces américaines absent ou expiré."
   },
   "rationalePatterns": [
     [
       "^Observed return volatility ([0-9.]+); no calibrated edge$",
       "Volatilité observée des rendements : $1 ; aucun avantage calibré."
+    ],
+    [
+      "^Scheduled US announcement: (\\w+) at (\\d\\d:\\d\\d) UTC$",
+      "Annonce américaine programmée ($1 à $2 UTC) : nouvelles entrées suspendues."
     ]
   ],
   "families": {
@@ -157,5 +163,17 @@
     "range_break": "Range Break (sorties de fourchette)",
     "jump": "Jump (sauts aléatoires)",
     "other": "Autre"
+  },
+  "usKinds": {
+    "NFP": "Emploi américain (NFP)",
+    "CPI": "Inflation américaine (CPI)",
+    "PPI": "Prix à la production (PPI)",
+    "FOMC": "Réserve fédérale (FOMC)"
+  },
+  "coverage": {
+    "ok": "à jour",
+    "expires_soon": "expire bientôt",
+    "expired": "expiré",
+    "empty": "vide"
   }
 }

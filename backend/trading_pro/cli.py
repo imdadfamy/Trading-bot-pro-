@@ -13,7 +13,18 @@ from .backup import backup_database, verify_backup
 from datetime import datetime
 
 
-def _model_cycle(args, parser, store, candles, critical, verified_urls):
+def _announcement_halt(parser, when):
+    """Reason to suspend entries at ``when`` because of a scheduled US announcement, or None."""
+    from . import us_events
+    try:
+        return us_events.load().halt_reason(when)
+    except FileNotFoundError:
+        return None
+    except ValueError as exc:
+        parser.error(f"config/us_events.json is invalid: {exc}")
+
+
+def _model_cycle(args, parser, store, candles, critical, verified_urls, halt_reason=""):
     """Explicit, budget-capped model run. Fails before any network call if configuration is incomplete."""
     from dataclasses import replace
     from .ai_orchestrator import analyze_with_models
@@ -37,7 +48,7 @@ def _model_cycle(args, parser, store, candles, critical, verified_urls):
         return analyze_with_models(store, provider, symbol=last.symbol, broker=last.broker, bid=last.bid,
                                    ask=last.ask, closed_prices=[c.close for c in candles], headlines=headlines,
                                    models=models, budget=budget, agents=agents, source_urls=verified_urls,
-                                   critical_event=critical, observed_at=last.closed_at)
+                                   critical_event=critical, observed_at=last.closed_at, halt_reason=halt_reason)
     except ValueError as exc:
         parser.error(str(exc))
 
@@ -75,6 +86,13 @@ def main():
     deriv.add_argument("--granularity", type=int, default=60, help="Seconds per candle: 60, 300, 3600...")
     deriv.add_argument("--count", type=int, default=1000, help="Candles requested, 2 to 5000")
     deriv.add_argument("--overwrite", action="store_true")
+    us = sub.add_parser("us-events", help="Show the scheduled US announcements and caution windows; read-only")
+    us.add_argument("--at", help="UTC time to check, ISO 8601 (default: now)")
+    us.add_argument("--limit", type=int, default=8)
+    refresh = sub.add_parser("refresh-us-events", help="Update config/us_events.json from official sources")
+    refresh.add_argument("--fed", action="store_true", help="Fetch the Federal Reserve FOMC calendar page (one request)")
+    refresh.add_argument("--bls-ics", help="Official bls.ics downloaded by a person from bls.gov (scripts are refused)")
+    refresh.add_argument("--dry-run", action="store_true", help="Show what would change without writing")
     mt5 = sub.add_parser("mt5-status", help="READ-ONLY check of the MT5 demo account and symbol specifications; no order")
     mt5.add_argument("--terminal-path", default=None, help="Path to terminal64.exe (default: standard install folder)")
     mt5.add_argument("--pattern", action="append", help="Symbol name pattern such as XAU* (repeatable)")
@@ -106,6 +124,42 @@ def main():
     if args.command == "verify-backup":
         result = verify_backup(args.path)
         print(json.dumps(result, indent=2))
+        return
+    if args.command == "us-events":
+        from datetime import timezone
+        from . import us_events
+        when = datetime.fromisoformat(args.at) if args.at else datetime.now(timezone.utc)
+        if when.tzinfo is None:
+            parser.error("--at must include a timezone, for example 2026-12-04T13:45:00+00:00")
+        try:
+            calendar = us_events.load()
+        except (FileNotFoundError, ValueError) as exc:
+            parser.error(f"US events file unavailable: {exc}")
+        print(json.dumps(us_events.describe(calendar, when, args.limit), indent=2, ensure_ascii=False))
+        return
+    if args.command == "refresh-us-events":
+        from datetime import timezone
+        from . import us_events, us_events_refresh as refresh_module
+        if not args.fed and not args.bls_ics:
+            parser.error("Choose --fed and/or --bls-ics FILE")
+        path = us_events.DEFAULT_PATH
+        document = json.loads(path.read_text(encoding="utf-8"))
+        fresh, notes = [], {}
+        try:
+            if args.fed:
+                fresh += refresh_module.parse_fed_calendar(refresh_module.fetch_fed_page(),
+                                                           since_year=datetime.now(timezone.utc).year)
+            if args.bls_ics:
+                events, ignored = refresh_module.parse_bls_ics(Path(args.bls_ics).read_text(encoding="utf-8"))
+                fresh += events
+                notes["bls_ignored_non_eastern"] = ignored
+            updated, summary = refresh_module.merge(document, fresh)
+        except (ValueError, OSError) as exc:
+            parser.error(f"Refresh refused, nothing written: {exc}")
+        if not args.dry_run:
+            refresh_module.save(path, updated)
+        print(json.dumps({"written": not args.dry_run, "changes": summary, **notes,
+                          "coverage": us_events.parse(updated).coverage(datetime.now(timezone.utc))}, indent=2))
         return
     if args.command == "mt5-status":
         from . import mt5_status
@@ -203,12 +257,15 @@ def main():
             relevant = [e for e in store.news_as_of(last.closed_at) if last.symbol in e["assets"]]
             critical = any(e["severity"] == "critical" and e["status"] != "retracted" for e in relevant)
             verified_urls = tuple(e["url"] for e in relevant if e["status"] == "confirmed")
+            halt = _announcement_halt(parser, last.closed_at) or ""
+            critical = critical or bool(halt)
             if args.command == "analyze-with-models":
-                result = _model_cycle(args, parser, store, candles, critical, verified_urls)
+                result = _model_cycle(args, parser, store, candles, critical, verified_urls, halt)
             else:
                 result = analyze(store, symbol=last.symbol, broker=last.broker, bid=last.bid,
                                  ask=last.ask, closed_prices=[c.close for c in candles],
-                                 observed_at=last.closed_at, critical_event=critical, source_urls=verified_urls)
+                                 observed_at=last.closed_at, critical_event=critical, source_urls=verified_urls,
+                                 halt_reason=halt)
     print(json.dumps(result, default=lambda x: asdict(x) if hasattr(x, "__dataclass_fields__") else str(x), indent=2))
 
 

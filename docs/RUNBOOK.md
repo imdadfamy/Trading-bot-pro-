@@ -1,6 +1,7 @@
 # Runbook initial
 
 - **Déconnexion MT5 / flux périmé :** bloquer les nouvelles entrées ; conserver les stops côté courtier ; vérifier positions et deals directement sur le terminal. Ne jamais rejouer une intention `sending` ou `uncertain` sans réconciliation.
+- **Annonce américaine programmée :** pendant la fenêtre de prudence (voir `ANNONCES_US.md`), aucune nouvelle entrée ; le cycle répond « attente » avec la raison. Alerte d'expiration dans la rubrique Sessions : relancer `refresh-us-events`. Une annonce imprévue n'est pas dans le calendrier : s'appuyer sur l'arrêt sur actualité critique et la limite d'écart.
 - **Annonce critique :** suspendre les nouvelles entrées et réévaluer les positions ; aucune inversion automatique.
 - **Budget IA dépassé :** bloquer les nouveaux signaux dépendant des modèles ; continuer le suivi des positions.
 - **Arrêt d'urgence :** l'API `POST /risk/kill-switch` maintient un état persistant actif et le journalise, mais l'intégration au worker MT5 n'est pas encore construite. Ne pas considérer cet endpoint comme une protection opérationnelle du courtier avant cette intégration.
