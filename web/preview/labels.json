@@ -80,7 +80,8 @@
     "autopilot.outcome": "Résultat d'une décision simulée mesuré",
     "autopilot.expired": "Décision simulée abandonnée (bougie d'entrée absente)",
     "autopilot.data_error": "Pilote automatique : données indisponibles",
-    "autopilot.error": "Pilote automatique : erreur interne"
+    "autopilot.error": "Pilote automatique : erreur interne",
+    "autopilot.scored": "Qualité d'une direction mesurée à horizon fixe"
   },
   "gates": {
     "broker_demo_verified": [

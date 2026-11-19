@@ -139,11 +139,41 @@ def performance(store: ResearchStore, symbol: str | None = None) -> dict:
         "scope": symbol or "all", "resolved_trades": len(resolved), "arms": by_arm,
         "by_arm_session": by_arm_session, "by_arm_symbol": by_arm_symbol,
         "skills_vs_plain": skills_vs_plain, "forced_vs_random": forced_vs_random, "skill_effects": skill_effects,
+        "direction": direction_performance(store),
         "reading_guide": (
             "R = gain or loss as a multiple of the initial stop distance, after spread. Intervals are widened for the "
             "number of groups compared. 'Significantly positive' needs at least 30 trades and a lower bound above 0. "
             "A shadow trade is a simulation on real bars, not an order. Few trades prove nothing; two weeks is a diagnostic."),
     }
+
+
+def _direction_rows(store: ResearchStore):
+    with store.journal.connect() as db:
+        rows = [dict(r) for r in db.execute(
+            "SELECT d.arm, d.symbol, d.session, d.detail, s.score, s.horizon_bars FROM decisions d "
+            "JOIN direction_scores s USING(decision_id)")]
+    for row in rows:
+        row["detail"] = json.loads(row["detail"])
+    return rows
+
+
+def direction_performance(store: ResearchStore) -> dict:
+    """Quality of the direction at a fixed horizon (signed move in stop distances, after the spread)."""
+    rows = _direction_rows(store)
+    arms = sorted({r["arm"] for r in rows})
+
+    def values(arm):
+        return [r["score"] for r in rows if r["arm"] == arm]
+
+    out = {"observations": len(rows), "arms": {arm: summarize(values(arm), max(len(arms), 1)) for arm in arms},
+           "skills_vs_plain": {}, "forced_vs_random": {}}
+    for agent in ("graph", "quant", "news", "director"):
+        plain, skilled, forced = values(f"plain:{agent}"), values(f"skills:{agent}"), values(f"forced:{agent}")
+        if plain or skilled:
+            out["skills_vs_plain"][agent] = _difference(skilled, plain, 4)
+        if forced or values("random:coin"):
+            out["forced_vs_random"][agent] = _difference(forced, values("random:coin"), 4)
+    return out
 
 
 def recent_decisions(store: ResearchStore, limit: int = 60) -> list[dict]:

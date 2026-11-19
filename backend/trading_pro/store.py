@@ -74,6 +74,12 @@ class ResearchStore:
               r_multiple REAL NOT NULL, bars_held INTEGER NOT NULL, mfe_r REAL NOT NULL,
               mae_r REAL NOT NULL, entry REAL NOT NULL, exit_price REAL NOT NULL,
               FOREIGN KEY(decision_id) REFERENCES decisions(decision_id));
+            CREATE TABLE IF NOT EXISTS direction_pending (
+              decision_id TEXT PRIMARY KEY, symbol TEXT NOT NULL, at TEXT NOT NULL, action TEXT NOT NULL,
+              horizon_bars INTEGER NOT NULL, unit REAL NOT NULL);
+            CREATE TABLE IF NOT EXISTS direction_scores (
+              decision_id TEXT PRIMARY KEY, resolved_at TEXT NOT NULL, horizon_bars INTEGER NOT NULL,
+              score REAL NOT NULL, FOREIGN KEY(decision_id) REFERENCES decisions(decision_id));
             CREATE TABLE IF NOT EXISTS operational_state (
               name TEXT PRIMARY KEY, value TEXT NOT NULL);
             INSERT OR IGNORE INTO operational_state(name,value) VALUES ('kill_switch','true');

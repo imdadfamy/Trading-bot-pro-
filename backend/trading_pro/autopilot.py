@@ -162,6 +162,21 @@ def resolve_trade(side: str, plan: dict, bars: list[Candle], *, spike_gap: bool 
     return None
 
 
+def score_direction(side: str, unit: float, bars: list[Candle], horizon: int) -> float | None:
+    """Fixed-horizon quality of a direction: the signed move after ``horizon`` bars, in stop distances, after the spread.
+
+    Unlike a shadow trade it has no stop or target and no position lock, so every BUY/SELL answer of a scored
+    cycle yields one observation (horizons equal the model cadence, so observations do not overlap). None = not yet.
+    """
+    if len(bars) < horizon or horizon < 1 or unit <= 0:
+        return None
+    first, last = bars[0], bars[horizon - 1]
+    entry = first.open + (max(first.ask - first.bid, 0) if side == "BUY" else 0)
+    exit_price = last.close + (max(last.ask - last.bid, 0) if side == "SELL" else 0)
+    move = (exit_price - entry) if side == "BUY" else (entry - exit_price)
+    return round(move / unit, 4)
+
+
 def _outcome(side, entry, exit_price, distance, result, held, mfe, mae):
     move = (exit_price - entry) if side == "BUY" else (entry - exit_price)
     return {"result": result, "r_multiple": round(move / distance, 4), "bars_held": held,
@@ -262,6 +277,31 @@ class Autopilot:
             resolved += 1
         return resolved
 
+    def resolve_directions(self, symbol: str, candles: list[Candle]) -> int:
+        step = TIMEFRAME_SECONDS[timeframe_for(get_config(self.store), symbol)]
+        with self.store.journal.connect() as db:
+            rows = [dict(r) for r in db.execute(
+                "SELECT decision_id,at,action,horizon_bars,unit FROM direction_pending WHERE symbol=?", (symbol,))]
+        done = 0
+        for row in rows:
+            decided = datetime.fromisoformat(row["at"])
+            bars = [c for c in candles if c.opened_at >= decided]
+            if bars and (bars[0].opened_at - decided).total_seconds() > 2 * step:
+                with self.store.journal.connect() as db:
+                    db.execute("DELETE FROM direction_pending WHERE decision_id=?", (row["decision_id"],))
+                self.store.journal.log("autopilot.expired", row["decision_id"], {"symbol": symbol, "kind": "direction"})
+                continue
+            value = score_direction(row["action"], row["unit"], bars, row["horizon_bars"])
+            if value is None:
+                continue
+            with self.store.journal.connect() as db:
+                db.execute("INSERT OR IGNORE INTO direction_scores VALUES(?,?,?,?)",
+                           (row["decision_id"], self.clock().isoformat(), row["horizon_bars"], value))
+                db.execute("DELETE FROM direction_pending WHERE decision_id=?", (row["decision_id"],))
+            self.store.journal.log("autopilot.scored", row["decision_id"], {"symbol": symbol, "score": value})
+            done += 1
+        return done
+
     # -- one cycle for one instrument
     def run_symbol(self, symbol: str) -> dict:
         with self._lock:
@@ -285,12 +325,14 @@ class Autopilot:
         last_bar = self.store.state_get(f"autopilot_last_bar:{symbol}")
         if last_bar and last.closed_at <= datetime.fromisoformat(last_bar):
             self.resolve_open(symbol, candles)
+            self.resolve_directions(symbol, candles)
             return {"symbol": symbol, "status": "no_new_bar"}
         floor = datetime.fromisoformat(last_bar) if last_bar else datetime.min.replace(tzinfo=timezone.utc)
         for candle in candles:
             if candle.closed_at > floor:
                 self.store.candle(candle)
         resolved = self.resolve_open(symbol, candles)
+        self.resolve_directions(symbol, candles)
 
         cycle_id = str(uuid4())
         self.store.snapshot(Snapshot(cycle_id, symbol, last.bid, last.ask, last.closed_at, last.broker))
@@ -305,6 +347,15 @@ class Autopilot:
                     halt = "US announcement calendar invalid"
         plan = trade_plan(candles, config)
         closes = [c.close for c in candles]
+        # A "scored cycle" happens once per model cadence: every arm's BUY/SELL of that cycle also gets a fixed-horizon
+        # direction score, so far more observations accumulate than the one-position-per-arm shadow trades allow.
+        score_key = f"autopilot_last_score:{symbol}"
+        previous = self.store.state_get(score_key)
+        cadence = timedelta(minutes=config["model_every_minutes"])
+        scored = (not halt) and (not previous or (now - datetime.fromisoformat(previous)) >= cadence)
+        if scored:
+            self.store.state_set(score_key, now.isoformat())
+        horizon = max(2, round(config["model_every_minutes"] * 60 / step))
         summary = {"cycle_id": cycle_id, "symbol": symbol, "bar_close": last.closed_at.isoformat(),
                    "session": session_label(last.closed_at), "halt": halt, "resolved": resolved, "arms": {}}
         if halt:
@@ -320,8 +371,13 @@ class Autopilot:
                     status = "skipped_open"
                 else:
                     status, detail = "open", {**detail, "plan": plan}
-                self._record(cycle_id, symbol, last.closed_at, arm, action.value, status, detail)
+                decision_id = self._record(cycle_id, symbol, last.closed_at, arm, action.value, status, detail)
                 summary["arms"][arm] = f"{action.value}/{status}"
+                if scored and action != Action.WAIT and plan is not None:
+                    with self.store.journal.connect() as db:
+                        db.execute("INSERT OR IGNORE INTO direction_pending VALUES(?,?,?,?,?,?)",
+                                   (decision_id, symbol, last.closed_at.isoformat(), action.value, horizon,
+                                    plan["stop_distance"]))
 
             cross = sma_signal(BacktestConfig())(closes, candles)
             propose("rule:sma_cross", cross or "WAIT", {"rationale": "SMA 5/20 crossover on closed bars"})
@@ -329,7 +385,7 @@ class Autopilot:
             propose("det:graph", graph.action, {"rationale": graph.rationale})
             coin = "BUY" if int(sha256(cycle_id.encode()).hexdigest(), 16) % 2 else "SELL"
             propose("random:coin", coin, {"rationale": "seeded coin flip: the chance reference for the forced-direction arms"})
-            self._model_arms(symbol, cycle_id, last, candles, config, propose, summary, now)
+            self._model_arms(symbol, cycle_id, last, candles, config, propose, summary, scored)
         self.store.state_set(f"autopilot_last_bar:{symbol}", last.closed_at.isoformat())
         self.store.journal.log("autopilot.cycle", cycle_id, summary)
         beat = self.heartbeat()
@@ -337,7 +393,7 @@ class Autopilot:
         return {"symbol": symbol, "status": "halted" if halt else "ok", **summary}
 
     # -- model arms
-    def _model_arms(self, symbol, cycle_id, last, candles, config, propose, summary, now):
+    def _model_arms(self, symbol, cycle_id, last, candles, config, propose, summary, scored):
         setup = self.model_setup() if callable(self.model_setup) else self.model_setup
         if isinstance(setup, str):
             summary["models"] = setup
@@ -345,9 +401,7 @@ class Autopilot:
         if setup is None:
             summary["models"] = "not configured"
             return
-        due_key = f"autopilot_last_model:{symbol}"
-        previous = self.store.state_get(due_key)
-        if previous and (now - datetime.fromisoformat(previous)) < timedelta(minutes=config["model_every_minutes"]):
+        if not scored:
             summary["models"] = "not due"
             return
         voters = ["graph", "quant"] + ([] if is_synthetic(symbol) else ["news"])
@@ -355,7 +409,6 @@ class Autopilot:
         if missing:
             summary["models"] = "model not configured for " + ", ".join(missing)
             return
-        self.store.state_set(due_key, now.isoformat())
         closes = [c.close for c in candles]
         headlines = [{"headline": e["headline"], "source": e["source"], "status": e["status"],
                       "relevance": e.get("relevance", "unclassified"), "published_at": e["published_at"]}
@@ -498,8 +551,9 @@ class AutopilotRunner:
                 self._next_check[symbol] = datetime.fromtimestamp(boundary, tz=timezone.utc)
             elif result["status"] == "no_new_bar":
                 self._next_check[symbol] = now + timedelta(seconds=20)
-            else:  # stale (market closed) or data error: look again in a few minutes
-                self._next_check[symbol] = now + timedelta(seconds=min(300, step))
+            else:  # stale or data error: 24/7 synthetic indices are never closed, so look again quickly
+                wait = 60 if is_synthetic(symbol) else min(300, step)
+                self._next_check[symbol] = now + timedelta(seconds=wait)
         self.autopilot._beat()
 
     def _loop(self) -> None:

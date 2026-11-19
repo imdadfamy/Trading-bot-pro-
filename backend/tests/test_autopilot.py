@@ -626,6 +626,136 @@ class ForcedAndDriftTests(unittest.TestCase):
         self.assertEqual(data["drift_short"]["window_bars"], 20)
 
 
+class LimitsTests(unittest.TestCase):
+    """More observations from the same cycles, and no wasted first cycle on a freshly added symbol."""
+
+    def rows(self, store, table):
+        with store.journal.connect() as db:
+            return [dict(r) for r in db.execute(f"SELECT * FROM {table}")]
+
+    def test_fixed_horizon_score_pays_the_spread_and_waits_for_enough_bars(self):
+        up = [candle("S", LAST_CLOSE + STEP * k, 100 + k, open_=100 + k - 1, high=101 + k, low=99 + k, spread=0.5)
+              for k in range(1, 7)]
+        self.assertAlmostEqual(autopilot.score_direction("BUY", 2.0, up, 6), (106 - 100.5) / 2.0)  # entry open 100 + spread
+        self.assertAlmostEqual(autopilot.score_direction("SELL", 2.0, up, 6), (100 - 106.5) / 2.0)  # exit pays the spread
+        self.assertIsNone(autopilot.score_direction("BUY", 2.0, up[:5], 6))
+        self.assertIsNone(autopilot.score_direction("BUY", 0, up, 6))
+
+    def test_every_buy_or_sell_of_a_scored_cycle_is_scored_even_when_its_position_slot_is_taken(self):
+        with tempfile.TemporaryDirectory() as temp:
+            clock = {"now": NOW}
+            store, pilot, state = build(temp, {"XAUUSD": rising("XAUUSD")}, clock=lambda: clock["now"])
+            pilot.run_symbol("XAUUSD")
+            pending = self.rows(store, "direction_pending")
+            arms = {d["arm"]: d["decision_id"] for d in decisions(store)}
+            self.assertIn(arms["det:graph"], {r["decision_id"] for r in pending})
+            self.assertIn(arms["random:coin"], {r["decision_id"] for r in pending})
+            self.assertEqual({r["horizon_bars"] for r in pending}, {6})  # 30 minutes of M5 bars
+            # the next bar is not a scored cycle (cadence), so nothing new is registered
+            clock["now"] = NOW + timedelta(minutes=5)
+            state["candles"]["XAUUSD"] = rising("XAUUSD", end=LAST_CLOSE + STEP)
+            pilot.run_symbol("XAUUSD")
+            self.assertEqual(len(self.rows(store, "direction_pending")), len(pending))
+            # after the horizon the score is written and the pending row disappears
+            base = state["candles"]["XAUUSD"]
+            more = [candle("XAUUSD", LAST_CLOSE + STEP * k, base[-1].close + 0.4 * (k - 1), spread=0.02)
+                    for k in range(2, 9)]
+            state["candles"]["XAUUSD"] = base[8:] + more
+            clock["now"] = NOW + timedelta(minutes=32)
+            pilot.run_symbol("XAUUSD")
+            scores = {r["decision_id"]: r["score"] for r in self.rows(store, "direction_scores")}
+            self.assertIn(arms["det:graph"], scores)
+            self.assertNotIn(arms["det:graph"], {r["decision_id"] for r in self.rows(store, "direction_pending")})
+            self.assertIsInstance(scores[arms["det:graph"]], float)  # one number, written once
+            kinds = [e["kind"] for e in store.journal.events(200)]
+            self.assertIn("autopilot.scored", kinds)
+
+    def test_direction_scores_are_never_taken_across_a_hole_in_the_bars(self):
+        with tempfile.TemporaryDirectory() as temp:
+            clock = {"now": NOW}
+            store, pilot, state = build(temp, {"XAUUSD": rising("XAUUSD")}, clock=lambda: clock["now"])
+            pilot.run_symbol("XAUUSD")
+            later = LAST_CLOSE + STEP * 100
+            state["candles"]["XAUUSD"] = rising("XAUUSD", end=later, n=60)
+            clock["now"] = later + timedelta(minutes=2)
+            pilot.run_symbol("XAUUSD")
+            self.assertEqual(self.rows(store, "direction_scores"), [])
+            first = self.rows(store, "direction_pending")
+            self.assertTrue(all(r["at"] != LAST_CLOSE.isoformat() for r in first))
+
+    def test_direction_statistics_compare_forced_agents_with_the_coin_on_many_observations(self):
+        with tempfile.TemporaryDirectory() as temp:
+            store = ResearchStore(str(Path(temp) / "t.db"))
+            n = [0]
+
+            def add(arm, values):
+                for value in values:
+                    n[0] += 1
+                    did = f"{arm}-{n[0]}"
+                    with store.journal.connect() as db:
+                        db.execute("INSERT INTO decisions VALUES(?,?,?,?,?,?,?,?,?)",
+                                   (did, did, "XAUUSD", NOW.isoformat(), "London", arm, "BUY", "skipped_open", "{}"))
+                        db.execute("INSERT INTO direction_scores VALUES(?,?,?,?)", (did, NOW.isoformat(), 6, value))
+            add("forced:graph", [0.5, 0.3, 0.6] * 15)
+            add("random:coin", [-0.2, 0.2] * 22)
+            add("skills:graph", [0.1, 0.0] * 20)
+            add("plain:graph", [-0.1, 0.0] * 20)
+            report = autopilot_stats.performance(store)["direction"]
+            self.assertEqual(report["observations"], 45 + 44 + 40 + 40)
+            self.assertTrue(report["forced_vs_random"]["graph"]["clearly_helps"])
+            self.assertEqual(report["arms"]["random:coin"]["trades"], 44)
+            self.assertIsNotNone(report["skills_vs_plain"]["graph"]["difference"])
+
+    def test_a_freshly_added_symbol_is_asked_again_until_its_history_has_synchronised(self):
+        from trading_pro.autopilot_runtime import fetch_when_fresh
+        old = [candle("S", LAST_CLOSE - timedelta(hours=5), 100)]
+        new = [candle("S", LAST_CLOSE, 100)]
+        answers = [(old, {"n": 1}), (old, {"n": 2}), (new, {"n": 3})]
+        pauses = []
+        result = fetch_when_fresh(lambda: answers.pop(0), step_seconds=300, clock=lambda: LAST_CLOSE.timestamp() + 120,
+                                  sleep=pauses.append)
+        self.assertEqual(result[1]["n"], 3)
+        self.assertEqual(len(pauses), 2)
+        pauses.clear()
+        fresh = fetch_when_fresh(lambda: (new, {"n": 9}), step_seconds=300, clock=lambda: LAST_CLOSE.timestamp() + 120,
+                                 sleep=pauses.append)
+        self.assertEqual((fresh[1]["n"], pauses), (9, []))
+        # a market that stays closed is given up on after the bounded number of tries and reported as it is
+        tries = []
+        stale = fetch_when_fresh(lambda: (tries.append(1) or (old, {"n": 0})), step_seconds=300,
+                                 clock=lambda: LAST_CLOSE.timestamp() + 120, sleep=lambda s: None)
+        self.assertEqual((len(tries), stale[1]["n"]), (4, 0))
+
+    def test_only_the_first_fetch_of_a_symbol_waits(self):
+        from unittest import mock
+        from trading_pro import autopilot_runtime
+        calls = []
+        old = [candle("S", LAST_CLOSE - timedelta(hours=5), 100)]
+
+        def fake_fetch(module, **kwargs):
+            calls.append(kwargs["symbol"])
+            return old, {"server_offset_hours": 0.0}
+        env = {"TIP_MT5_DEMO_LOGIN": "123", "TIP_MT5_DEMO_SERVER": "Srv"}
+        with mock.patch("trading_pro.mt5_history.fetch", fake_fetch), mock.patch.object(autopilot_runtime.time, "sleep", lambda s: None):
+            fetch = autopilot_runtime.mt5_fetcher(module=object(), environ=env, clock=lambda: LAST_CLOSE.timestamp() + 120)
+            fetch("Boom 500 Index", "M5", 50)
+            self.assertEqual(len(calls), 4)  # warm-up: four bounded attempts
+            fetch("Boom 500 Index", "M5", 50)
+            self.assertEqual(len(calls), 5)  # afterwards a single attempt: stale means closed, not unsynchronised
+
+    def test_stale_synthetic_symbols_are_retried_after_a_minute_but_gold_waits_longer(self):
+        with tempfile.TemporaryDirectory() as temp:
+            late = NOW + timedelta(hours=3)
+            store, pilot, _ = build(temp, {"XAUUSD": rising("XAUUSD"), "Boom 500 Index": rising("Boom 500 Index")},
+                                    clock=lambda: late)
+            autopilot.set_config(store, {"symbols": ["XAUUSD", "Boom 500 Index"]}, author="t")
+            autopilot.set_mode(store, "observe", author="t")
+            runner = AutopilotRunner(pilot)
+            runner.tick()
+            self.assertEqual(runner._next_check["Boom 500 Index"], late + timedelta(seconds=60))
+            self.assertEqual(runner._next_check["XAUUSD"], late + timedelta(seconds=300))
+
+
 class SettingsLevelTests(unittest.TestCase):
     def test_risk_level_is_versioned_validated_and_feeds_the_risk_engine(self):
         with tempfile.TemporaryDirectory() as temp:

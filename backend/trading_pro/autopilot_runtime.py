@@ -8,6 +8,24 @@ from .autopilot import ModelSetup
 from .mt5_status import DEFAULT_TERMINAL, credentials_from_env
 
 OFFSET_TTL_SECONDS = 3600
+WARMUP_TRIES = 4
+WARMUP_PAUSE_SECONDS = 3.0
+
+
+def fetch_when_fresh(fetch_once, *, step_seconds: int, clock=time.time, sleep=time.sleep,
+                     tries: int = WARMUP_TRIES, pause: float = WARMUP_PAUSE_SECONDS):
+    """A symbol that was just added to Market Watch answers with old bars until its history has synchronised.
+
+    Ask again a few times (about ten seconds in all) until the last closed bar is recent, then give up and
+    return what we have: the pilot reports such data as stale rather than analysing it.
+    """
+    for attempt in range(max(tries, 1)):
+        candles, meta = fetch_once()
+        if candles and clock() - candles[-1].closed_at.timestamp() <= 3 * step_seconds:
+            return candles, meta
+        if attempt < tries - 1:
+            sleep(pause)
+    return candles, meta
 
 
 def mt5_fetcher(*, module=None, environ=None, clock=time.time):
@@ -22,8 +40,17 @@ def mt5_fetcher(*, module=None, environ=None, clock=time.time):
     login, server, password = credentials_from_env(environ)
     path = str(DEFAULT_TERMINAL) if DEFAULT_TERMINAL.is_file() else None
     cache: dict[str, tuple[float, float]] = {}
+    warmed: set[str] = set()
 
     def fetch(symbol: str, timeframe: str, count: int):
+        if symbol in warmed:
+            return fetch_once(symbol, timeframe, count)
+        result = fetch_when_fresh(lambda: fetch_once(symbol, timeframe, count),
+                                  step_seconds=mt5_history.TIMEFRAMES[timeframe], clock=clock)
+        warmed.add(symbol)  # only the first fetch of a symbol waits: later stale data means a closed market
+        return result
+
+    def fetch_once(symbol: str, timeframe: str, count: int):
         known = cache.get(symbol)
         offset = known[0] if known and clock() - known[1] < OFFSET_TTL_SECONDS else None
         try:

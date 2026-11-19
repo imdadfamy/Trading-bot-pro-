@@ -153,9 +153,16 @@ function performanceCards(perf) {
     `avec ${e.n_with} positions (R ${num(e.mean_r_with)}) · sans ${e.n_without} (R ${num(e.mean_r_without)}) · écart ${num(e.difference)}`,
     e.clearly_helps ? "AIDE" : e.clearly_hurts ? "NUIT" : e.underpowered ? "TROP PEU DE DONNÉES" : "INCERTAIN"])));
   out.push(skills);
+  const dir = perf.direction || { arms: {}, forced_vs_random: {}, observations: 0 };
+  const direction = card("Qualité de la direction à horizon fixe");
+  append(direction, info("Pour chaque avis d'achat ou de vente d'un cycle d'analyse, on mesure le mouvement du prix après un délai égal à l'intervalle entre deux consultations de l'IA, en distances de stop et après l'écart d'achat-vente. Sans position bloquée, ces observations sont bien plus nombreuses que les positions simulées."));
+  const dirNames = Object.keys(dir.arms || {});
+  if (!dirNames.length) append(direction, empty("Aucune observation mesurée pour l'instant (premiers résultats après un délai d'analyse)."));
+  dirNames.forEach(arm => { const a = dir.arms[arm]; append(direction, row([armName(arm), `${a.trades} observations · mouvement moyen ${num(a.mean_r)} · direction juste ${pct(a.win_rate)}`, perfBadge(a)])); });
+  out.push(direction);
   const forced = card("La direction forcée bat-elle la pièce de monnaie ?");
   append(forced, info("Variante de recherche : l'analyste doit choisir achat ou vente à chaque cycle. On la compare à un tirage à pile ou face, la référence du hasard. Un résultat n'est crédible qu'avec au moins 30 positions et un écart dont l'intervalle reste au-dessus de zéro."));
-  const duels = Object.entries(perf.forced_vs_random || {});
+  const duels = Object.entries((dir.observations && Object.values(dir.forced_vs_random || {}).some(d => d.n_without > 0)) ? dir.forced_vs_random : (perf.forced_vs_random || {}));
   if (!duels.length) append(forced, empty("Pas encore de données."));
   duels.forEach(([agent, d]) => append(forced, row([role(agent),
     `forcée : R moyen ${num(d.mean_r_with)} (${d.n_with}) · pile ou face : ${num(d.mean_r_without)} (${d.n_without})${d.difference_interval ? ` · écart ${num(d.difference)} [${num(d.difference_interval[0])} ; ${num(d.difference_interval[1])}]` : ""}`,
