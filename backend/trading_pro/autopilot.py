@@ -422,7 +422,8 @@ def status(store: ResearchStore, now: datetime | None = None) -> dict:
     return {"mode": mode, "active": mode != "off", "config": get_config(store),
             "alive": age is not None and age < 120, "heartbeat_age_seconds": age,
             "cycles": beat.get("cycles", 0), "errors": beat.get("errors", 0), "last_error": beat.get("last_error"),
-            "last_cycle": beat.get("last_cycle", {}), "decisions_by_status": counts, "decisions_today": today,
+            "last_cycle": beat.get("last_cycle", {}), "symbol_status": beat.get("symbol_status", {}),
+            "decisions_by_status": counts, "decisions_today": today,
             "shadow_outcomes": outcomes, "costs": store.costs(),
             "demo_auto_available": False,
             "demo_auto_reason": "Étape 3 : les ordres automatiques en démo ne sont pas encore commissionnés."}
@@ -469,6 +470,10 @@ class AutopilotRunner:
                 store.journal.log("autopilot.error", symbol, {"error": type(exc).__name__, "message": str(exc)[:200]})
                 self._next_check[symbol] = now + timedelta(seconds=60)
                 continue
+            beat = self.autopilot.heartbeat()
+            seen = beat.get("symbol_status", {})
+            seen[symbol] = {"status": result["status"], "at": now.isoformat(), "message": result.get("message", "")}
+            self.autopilot._beat(symbol_status=seen)
             boundary = (int(now.timestamp()) // step + 1) * step + 5
             if result["status"] in ("ok", "halted"):
                 self._next_check[symbol] = datetime.fromtimestamp(boundary, tz=timezone.utc)
@@ -482,6 +487,10 @@ class AutopilotRunner:
         while not self._stop.is_set():
             try:
                 self.tick()
-            except Exception:  # noqa: BLE001 - never let the thread die silently
-                pass
+            except Exception as exc:  # noqa: BLE001 - never let the thread die silently, and never hide why
+                try:
+                    self.autopilot.store.journal.log("autopilot.error", "loop",
+                                                     {"error": type(exc).__name__, "message": str(exc)[:200]})
+                except Exception:  # noqa: BLE001
+                    pass
             self._stop.wait(self.poll)

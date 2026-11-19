@@ -29,6 +29,8 @@ class Settings(BaseModel):
     experiment_ai_limit_usd: float = Field(ge=0, le=10000, default=50)
     quote_max_age_seconds: float = Field(gt=0, le=60, default=5)
     mode: str = "observation"
+    ai_cap_enabled: bool = True
+    risk: dict | None = None
 
 
 @app.get("/health")

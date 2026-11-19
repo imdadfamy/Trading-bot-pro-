@@ -48,6 +48,7 @@ async function run() {
   await tick();
   for (const url of ["/dashboard", "/agents", "/signals"]) complete(url, url === "/dashboard" ? { events: [] } : []);
   complete("/market/candles", { candles: [] });
+  complete("/autopilot", { mode: "off", alive: false, last_cycle: {}, cycles: 0, decisions_today: 0, shadow_outcomes: 0, errors: 0, costs: { total_usd: 0 } });
   await tick();
   const agents = vm.runInContext('render("AI Agents")', context);
   const skills = vm.runInContext('render("Skills Library")', context);
@@ -68,6 +69,7 @@ async function run() {
   await tick();
   for (const url of ["/dashboard", "/agents", "/signals"]) complete(url, url === "/dashboard" ? { events: [] } : []);
   complete("/market/candles", { candles: [] });
+  complete("/autopilot", { mode: "off", alive: false, last_cycle: {}, cycles: 0, decisions_today: 0, shadow_outcomes: 0, errors: 0, costs: { total_usd: 0 } });
   await home;
   assert.doesNotMatch(text(content), /ANCIENNE RÉPONSE/);
   assert.match(text(content), /AUCUN CYCLE/);

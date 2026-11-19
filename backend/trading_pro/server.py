@@ -112,6 +112,19 @@ def handler_factory(service: Service, operator_key: str | None = None, runner=No
         def do_PATCH(self):
             if not self._authorized():
                 return self._json(403, {"error": "Operator authentication required"})
+            if urlsplit(self.path).path == "/autopilot/config":
+                from . import autopilot
+                try:
+                    size = int(self.headers.get("Content-Length", "0"))
+                    if size <= 0 or size > 4096:
+                        return self._json(413, {"error": "Invalid request size"})
+                    patch = json.loads(self.rfile.read(size))
+                    if not isinstance(patch, dict):
+                        raise ValueError("Settings must be an object")
+                    config = autopilot.set_config(service.store, patch, author=self.headers.get("X-Operator-Name", "local-operator"))
+                    return self._json(200, {"config": config})
+                except (ValueError, TypeError, json.JSONDecodeError) as exc:
+                    return self._json(400, {"error": str(exc)})
             if urlsplit(self.path).path != "/settings":
                 return self._json(404, {"error": "Unknown route"})
             try:

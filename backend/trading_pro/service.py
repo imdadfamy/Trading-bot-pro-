@@ -8,6 +8,31 @@ from .market import session_label, sessions_at
 from .store import ResearchStore
 
 
+DEFAULT_RISK = {"risk_per_trade": 0.005, "max_daily_loss": 0.02, "max_open_risk": 0.01, "max_positions": 2,
+                "max_spread": 0.5, "fixed_lot": None, "commission_per_lot": 0.0, "slippage_ticks": 2.0}
+RISK_RANGES = {"risk_per_trade": (0.0005, 0.02), "max_daily_loss": (0.002, 0.10), "max_open_risk": (0.0005, 0.05),
+               "max_positions": (1, 10), "max_spread": (0, 100000), "commission_per_lot": (0, 1000),
+               "slippage_ticks": (0, 1000)}
+
+
+def validate_risk(risk) -> dict:
+    """Operator-editable risk level. Ranges are guard rails, not advice; see docs for the specification defaults."""
+    if not isinstance(risk, dict) or set(risk) != set(DEFAULT_RISK):
+        raise ValueError("Risk settings must contain exactly: " + ", ".join(DEFAULT_RISK))
+    for key, (low, high) in RISK_RANGES.items():
+        value = risk[key]
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not low <= value <= high:
+            raise ValueError(f"Invalid risk setting {key}: expected a number between {low} and {high}")
+    if int(risk["max_positions"]) != risk["max_positions"]:
+        raise ValueError("max_positions must be a whole number")
+    lot = risk["fixed_lot"]
+    if lot is not None and (isinstance(lot, bool) or not isinstance(lot, (int, float)) or not 0.01 <= lot <= 100):
+        raise ValueError("fixed_lot must be empty (volume computed from the risk) or between 0.01 and 100")
+    if risk["max_open_risk"] < risk["risk_per_trade"]:
+        raise ValueError("max_open_risk cannot be below risk_per_trade")
+    return dict(risk)
+
+
 class Service:
     def __init__(self, database: str, skills_root: str | None = None):
         self.store = ResearchStore(database)
@@ -26,20 +51,40 @@ class Service:
     def settings(self):
         with self.store.journal.connect() as db:
             row = db.execute("SELECT version,payload FROM settings ORDER BY version DESC LIMIT 1").fetchone()
-            return {"version": row["version"], "settings": json.loads(row["payload"])} if row else {
-                "version": 0, "settings": {"mode": "observation", "model_by_agent": {},
-                                             "daily_ai_limit_usd": 5, "experiment_ai_limit_usd": 50,
-                                             "quote_max_age_seconds": 5}}
+            defaults = {"mode": "observation", "model_by_agent": {}, "daily_ai_limit_usd": 5,
+                        "experiment_ai_limit_usd": 50, "quote_max_age_seconds": 5,
+                        "ai_cap_enabled": True, "risk": dict(DEFAULT_RISK)}
+            if not row:
+                return {"version": 0, "settings": defaults}
+            stored = json.loads(row["payload"])
+            return {"version": row["version"],
+                    "settings": {**defaults, **stored, "risk": {**DEFAULT_RISK, **stored.get("risk", {})}}}
 
     def model_budget(self):
         from .models import Budget
         config = self.settings()["settings"]
+        if not config.get("ai_cap_enabled", True):  # operator removed the ceiling: spend is only measured
+            return Budget(float("inf"), float("inf"))
         return Budget(config["daily_ai_limit_usd"], config["experiment_ai_limit_usd"])
 
+    def limits(self):
+        """Risk limits for the risk engine, from the versioned operator settings."""
+        from .core import Limits
+        config = self.settings()["settings"]
+        risk = config["risk"]
+        return Limits(risk_per_trade=risk["risk_per_trade"], max_daily_loss=risk["max_daily_loss"],
+                      max_open_risk=risk["max_open_risk"], max_positions=int(risk["max_positions"]),
+                      max_spread=risk["max_spread"], max_quote_age_seconds=config["quote_max_age_seconds"])
+
     def update_settings(self, data: dict, expected_version: int, author: str):
-        allowed = {"mode", "model_by_agent", "daily_ai_limit_usd", "experiment_ai_limit_usd", "quote_max_age_seconds"}
-        if set(data) != allowed or data.get("mode") != "observation":
+        required = {"mode", "model_by_agent", "daily_ai_limit_usd", "experiment_ai_limit_usd", "quote_max_age_seconds"}
+        optional = {"ai_cap_enabled", "risk"}
+        if not required <= set(data) or set(data) - required - optional or data.get("mode") != "observation":
             raise ValueError("Only complete observation-mode settings are supported")
+        if "ai_cap_enabled" in data and not isinstance(data["ai_cap_enabled"], bool):
+            raise ValueError("ai_cap_enabled must be true or false")
+        if "risk" in data:
+            data = {**data, "risk": validate_risk(data["risk"])}
         models = data.get("model_by_agent")
         if not isinstance(models, dict) or set(models) - {"graph", "news", "quant", "risk", "director"}:
             raise ValueError("Unknown model assignment")
@@ -105,7 +150,10 @@ class Service:
             configured = self.settings()["settings"]
             daily_limit = configured["daily_ai_limit_usd"]
             experiment_limit = configured["experiment_ai_limit_usd"]
-            return {**costs, "daily_limit_usd": daily_limit,
+            if not configured.get("ai_cap_enabled", True):
+                return {**costs, "cap_enabled": False, "daily_limit_usd": None, "experiment_limit_usd": None,
+                        "daily_ratio": None, "experiment_ratio": None, "new_model_calls_blocked": False}
+            return {**costs, "cap_enabled": True, "daily_limit_usd": daily_limit,
                     "experiment_limit_usd": experiment_limit,
                     "daily_ratio": costs["today_usd"]/daily_limit if daily_limit else None,
                     "experiment_ratio": costs["total_usd"]/experiment_limit if experiment_limit else None,

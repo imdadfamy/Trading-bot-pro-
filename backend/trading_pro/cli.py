@@ -143,7 +143,8 @@ def main():
     send.add_argument("--commission", type=float, required=True, help="Round-trip commission per lot you assume (0 if none)")
     send.add_argument("--slippage-ticks", type=float, required=True, help="Slippage in ticks you assume")
     send.add_argument("--max-spread", type=float, default=None, help="Spread limit in price units (default: risk engine default)")
-    send.add_argument("--risk-fraction", type=float, default=0.005, help="Risk per trade for the risk engine (max 0.02)")
+    send.add_argument("--risk-fraction", type=float, default=None,
+                      help="Risk per trade for the risk engine (max 0.02; default: the value saved in Settings)")
     send.add_argument("--select", action="store_true")
     send.add_argument("--terminal-path", default=None)
     close = sub.add_parser("mt5-close-demo", help="Closes the open position(s) of this project on a symbol (demo)")
@@ -250,6 +251,13 @@ def main():
             default_path = str(mt5_status.DEFAULT_TERMINAL) if mt5_status.DEFAULT_TERMINAL.is_file() else None
             path = args.terminal_path or default_path
             guarded_store = ResearchStore(args.database)
+            if args.command == "mt5-send-demo":
+                from .service import Service
+                saved = Service(args.database).settings()["settings"]["risk"]
+                if args.risk_fraction is None:
+                    args.risk_fraction = saved["risk_per_trade"]
+                if args.max_spread is None and saved["max_spread"] != 0.5:
+                    args.max_spread = saved["max_spread"]
             if args.command == "mt5-send-demo":
                 report = mt5_send.send_supervised(
                     terminal_module, guarded_store, symbol=args.symbol, side=args.side, confirm=args.confirm,

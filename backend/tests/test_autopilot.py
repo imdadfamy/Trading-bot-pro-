@@ -466,5 +466,65 @@ class HttpAndProviderTests(unittest.TestCase):
         self.assertNotIn("Project method notes", seen["body"]["input"][0]["content"])
 
 
+class SettingsLevelTests(unittest.TestCase):
+    def test_risk_level_is_versioned_validated_and_feeds_the_risk_engine(self):
+        with tempfile.TemporaryDirectory() as temp:
+            service = Service(str(Path(temp) / "db.sqlite"))
+            current = service.settings()
+            self.assertEqual(current["settings"]["risk"]["risk_per_trade"], 0.005)
+            changed = {**current["settings"], "risk": {**current["settings"]["risk"], "risk_per_trade": 0.01,
+                                                         "max_open_risk": 0.02, "max_positions": 3, "fixed_lot": 0.05}}
+            service.update_settings(changed, 0, "test")
+            limits = service.limits()
+            self.assertEqual((limits.risk_per_trade, limits.max_open_risk, limits.max_positions), (0.01, 0.02, 3))
+            self.assertEqual(service.settings()["settings"]["risk"]["fixed_lot"], 0.05)
+            for bad in ({"risk_per_trade": 0.5}, {"max_positions": 0}, {"max_positions": 2.5}, {"fixed_lot": 0},
+                        {"max_open_risk": 0.0006, "risk_per_trade": 0.01}, {"max_daily_loss": True}):
+                with self.assertRaises(ValueError, msg=str(bad)):
+                    service.update_settings({**changed, "risk": {**changed["risk"], **bad}}, 1, "test")
+            with self.assertRaises(ValueError):
+                service.update_settings({**changed, "risk": {"risk_per_trade": 0.01}}, 1, "test")
+            kinds = [e["kind"] for e in service.store.journal.events(5)]
+            self.assertIn("settings.changed", kinds)
+
+    def test_older_saved_settings_still_load_with_defaults(self):
+        with tempfile.TemporaryDirectory() as temp:
+            service = Service(str(Path(temp) / "db.sqlite"))
+            with service.store.journal.connect() as db:
+                db.execute("INSERT INTO settings VALUES(1,'2026-11-01T00:00:00+00:00',?)", (json.dumps(
+                    {"mode": "observation", "model_by_agent": {"graph": "m"}, "daily_ai_limit_usd": 5,
+                     "experiment_ai_limit_usd": 50, "quote_max_age_seconds": 5}),))
+            loaded = service.settings()["settings"]
+            self.assertTrue(loaded["ai_cap_enabled"])
+            self.assertEqual(loaded["risk"]["max_positions"], 2)
+
+    def test_the_ai_ceiling_can_be_removed_and_spend_is_still_measured(self):
+        with tempfile.TemporaryDirectory() as temp:
+            service = Service(str(Path(temp) / "db.sqlite"))
+            capped = service.settings()["settings"]
+            self.assertEqual(service.model_budget().daily_usd, 5)
+            service.update_settings({**capped, "ai_cap_enabled": False}, 0, "test")
+            budget = service.model_budget()
+            self.assertEqual((budget.daily_usd, budget.experiment_usd), (float("inf"), float("inf")))
+            service.store.record_usage(agent="graph", provider="p", model="m", input_tokens=1, output_tokens=1, cost_usd=7.5)
+            costs = service.read("/costs")
+            self.assertFalse(costs["cap_enabled"])
+            self.assertFalse(costs["new_model_calls_blocked"])
+            self.assertEqual(costs["total_usd"], 7.5)
+            with self.assertRaises(ValueError):
+                service.update_settings({**capped, "ai_cap_enabled": "no"}, 1, "test")
+
+    def test_autopilot_config_endpoint_needs_the_key_and_validates(self):
+        with tempfile.TemporaryDirectory() as temp:
+            service = Service(str(Path(temp) / "db.sqlite"))
+            cls = handler_factory(service, "secret-key", None)
+            caller = HttpAndProviderTests().call
+            self.assertEqual(caller(cls, "PATCH", "/autopilot/config", b'{"horizon_bars": 20}')[0], 403)
+            code, payload = caller(cls, "PATCH", "/autopilot/config", b'{"horizon_bars": 20}', key="secret-key")
+            self.assertEqual((code, payload["config"]["horizon_bars"]), (200, 20))
+            self.assertEqual(caller(cls, "PATCH", "/autopilot/config", b'{"horizon_bars": 1}', key="secret-key")[0], 400)
+            self.assertEqual(caller(cls, "PATCH", "/autopilot/config", b'[1]', key="secret-key")[0], 400)
+
+
 if __name__ == "__main__":
     unittest.main()
