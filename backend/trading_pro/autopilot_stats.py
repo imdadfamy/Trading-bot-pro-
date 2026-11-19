@@ -115,6 +115,12 @@ def performance(store: ResearchStore, symbol: str | None = None) -> dict:
         plain, skilled = group("plain", agent), group("skills", agent)
         if plain or skilled:
             skills_vs_plain[agent] = _difference(skilled, plain, 4)
+    random_values = group("random", "coin")
+    forced_vs_random = {}
+    for agent in ("graph", "quant", "news", "director"):
+        forced = group("forced", agent)
+        if forced or random_values:
+            forced_vs_random[agent] = _difference(forced, random_values, 4)
     skill_ids = sorted({s.split("@")[0] for r in resolved if r["arm"].startswith("skills:")
                         and r["arm"] != "skills:director" for s in r["detail"].get("skills", [])})
     skill_effects = []
@@ -132,7 +138,7 @@ def performance(store: ResearchStore, symbol: str | None = None) -> dict:
     return {
         "scope": symbol or "all", "resolved_trades": len(resolved), "arms": by_arm,
         "by_arm_session": by_arm_session, "by_arm_symbol": by_arm_symbol,
-        "skills_vs_plain": skills_vs_plain, "skill_effects": skill_effects,
+        "skills_vs_plain": skills_vs_plain, "forced_vs_random": forced_vs_random, "skill_effects": skill_effects,
         "reading_guide": (
             "R = gain or loss as a multiple of the initial stop distance, after spread. Intervals are widened for the "
             "number of groups compared. 'Significantly positive' needs at least 30 trades and a lower bound above 0. "

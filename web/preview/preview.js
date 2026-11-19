@@ -153,6 +153,14 @@ function performanceCards(perf) {
     `avec ${e.n_with} positions (R ${num(e.mean_r_with)}) · sans ${e.n_without} (R ${num(e.mean_r_without)}) · écart ${num(e.difference)}`,
     e.clearly_helps ? "AIDE" : e.clearly_hurts ? "NUIT" : e.underpowered ? "TROP PEU DE DONNÉES" : "INCERTAIN"])));
   out.push(skills);
+  const forced = card("La direction forcée bat-elle la pièce de monnaie ?");
+  append(forced, info("Variante de recherche : l'analyste doit choisir achat ou vente à chaque cycle. On la compare à un tirage à pile ou face, la référence du hasard. Un résultat n'est crédible qu'avec au moins 30 positions et un écart dont l'intervalle reste au-dessus de zéro."));
+  const duels = Object.entries(perf.forced_vs_random || {});
+  if (!duels.length) append(forced, empty("Pas encore de données."));
+  duels.forEach(([agent, d]) => append(forced, row([role(agent),
+    `forcée : R moyen ${num(d.mean_r_with)} (${d.n_with}) · pile ou face : ${num(d.mean_r_without)} (${d.n_without})${d.difference_interval ? ` · écart ${num(d.difference)} [${num(d.difference_interval[0])} ; ${num(d.difference_interval[1])}]` : ""}`,
+    d.clearly_helps ? "BAT LE HASARD" : d.clearly_hurts ? "PIRE QUE LE HASARD" : d.underpowered ? "TROP PEU DE DONNÉES" : "INDISTINGUABLE DU HASARD"])));
+  out.push(forced);
   return out;
 }
 function sessionCard(perf) {

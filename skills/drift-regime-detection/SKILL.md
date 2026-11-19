@@ -16,7 +16,7 @@ Deriv, 'Synthetic indices' (read 18 Nov 2026): Drift Switching indices alternate
 UTC timestamps, broker and symbol identity, validated finite numeric values; abort on missing or contradictory inputs. Never send broker orders.
 
 ## JSON input
-`{"cycle_id":"string","skill_version":"0.2.0","inputs":{"description":"features.drift (mean return per bar, t statistic, SMA 20/50 relation), closed candles, regime length hint"}}`
+`{"cycle_id":"string","skill_version":"0.2.0","inputs":{"description":"features.drift (60 bars) and features.drift_short (20 bars): mean return per bar and t statistic; SMA 20/50 relation; closed candles. Drift Switch indices are read on M1 bars"}}`
 
 ## JSON output
 `{"cycle_id":"string","skill":"drift-regime-detection","action":"BUY|SELL|WAIT","rationale":"string","evidence":["measurement id"],"score":null,"invalidations":["condition"]}`

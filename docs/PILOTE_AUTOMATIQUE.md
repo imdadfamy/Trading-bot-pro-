@@ -1,6 +1,6 @@
 # Agents automatiques (mode observation)
 
-**À quoi ça sert.** Les agents analysent chaque nouvelle bougie M5 sur Volatility 75 et sur l'or, jour et nuit, tant que tu ne les désactives pas. Ils **n'envoient aucun ordre**. Chaque avis est journalisé ; chaque achat ou vente ouvre une **position simulée** mesurée sur les vraies bougies suivantes (écart d'achat-vente inclus). C'est ainsi qu'on apprend quelles méthodes, quelles compétences et quelles sessions donnent de bonnes analyses.
+**À quoi ça sert.** Les agents analysent chaque nouvelle bougie sur Volatility 10, Boom 500, Crash 500, Drift Switch 10/20/30 (lus en M1) et l'or (M5), jour et nuit, tant que tu ne les désactives pas. Ils **n'envoient aucun ordre**. Chaque avis est journalisé ; chaque achat ou vente ouvre une **position simulée** mesurée sur les vraies bougies suivantes (écart d'achat-vente inclus). C'est ainsi qu'on apprend quelles méthodes, quelles compétences et quelles sessions donnent de bonnes analyses.
 
 ## Utilisation
 1. Lance l'application (`Start-Local.ps1`) : le serveur local héberge le pilote. La clé opérateur s'affiche dans sa fenêtre PowerShell.
@@ -14,7 +14,9 @@
 | Règle simple | croisement de moyennes 5/20 (référence du cahier des charges) |
 | Analyste de base | tendance 5/20 sans IA |
 | Agents IA sans compétences | analyste graphique, quantitatif, veilleur (or seulement), directeur par accord de deux analystes |
-| Agents IA + compétences | mêmes agents, avec indicateurs calculés par code (ATR, swings, fourchette, volume) et 3 compétences tirées au sort à chaque cycle |
+| Agents IA + compétences | mêmes agents, avec indicateurs calculés par code (ATR, RSI, dérive, pics, swings, fourchette, volume) et 3 compétences tirées au sort à chaque cycle |
+| Agents IA + compétences, direction forcée | mêmes données, mais l'analyste doit choisir achat ou vente ; comparé au pile ou face |
+| Pile ou face | achat ou vente tiré au hasard à chaque cycle : la référence du hasard |
 
 Pour chaque méthode : nombre de positions, R moyen (gain ou perte en multiple du risque initial), réussite, abstention, appels IA en échec. Rien n'est dit « significatif » sans 30 positions au moins et un intervalle corrigé au-dessus de zéro. Les écarts avec/sans compétences sont calculés par agent et par compétence (écran « Agents IA »), les résultats par session dans « Sessions ».
 

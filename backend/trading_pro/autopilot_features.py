@@ -156,6 +156,7 @@ def features(candles: list[Candle]) -> dict:
         "tick_volume_ratio": round(last.tick_volume / mean(volumes), 3) if volumes and mean(volumes) > 0 else None,
         "spread": round(spread, 6), "spread_to_atr": round(spread / value, 4) if value else None,
         "rsi_14": rsi([c.close for c in candles]), "drift": drift_stats([c.close for c in candles]),
+        "drift_short": drift_stats([c.close for c in candles], 20),
         "spikes": spike_stats(candles), "setup_ma_rsi": ma_rsi_setup(candles, value),
         "session": session_label(last.closed_at),
         "last_closed_at": last.closed_at.isoformat(),

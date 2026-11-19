@@ -13,6 +13,7 @@ import threading
 import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from hashlib import sha256
 from statistics import median
 from uuid import uuid4
 
@@ -28,7 +29,10 @@ from .store import ResearchStore
 MODES = ("off", "observe")
 TIMEFRAME_SECONDS = {"M1": 60, "M5": 300, "M15": 900, "M30": 1800, "H1": 3600}
 DEFAULT_CONFIG = {
-    "symbols": ["Volatility 10 Index", "Boom 500 Index", "Crash 500 Index", "XAUUSD"], "timeframe": "M5", "bars": 300,
+    "symbols": ["Volatility 10 Index", "Boom 500 Index", "Crash 500 Index", "Drift Switch Index 10",
+                "Drift Switch Index 20", "Drift Switch Index 30", "XAUUSD"], "timeframe": "M5", "bars": 300,
+    # Drift Switch regimes last 10 to 30 minutes on average: M5 bars are too coarse, so they are read on M1 bars.
+    "symbol_timeframes": {"Drift Switch Index 10": "M1", "Drift Switch Index 20": "M1", "Drift Switch Index 30": "M1"},
     "model_every_minutes": 30, "horizon_bars": 48, "stop_atr_multiple": 2.0, "reward_multiple": 2.0,
     "skill_pack_size": 3, "max_call_usd": 0.25,
 }
@@ -66,6 +70,10 @@ def get_config(store: ResearchStore) -> dict:
     return config
 
 
+def timeframe_for(config: dict, symbol: str) -> str:
+    return config.get("symbol_timeframes", {}).get(symbol, config["timeframe"])
+
+
 def set_config(store: ResearchStore, patch: dict, *, author: str) -> dict:
     config = get_config(store)
     for key, item in patch.items():
@@ -78,6 +86,10 @@ def set_config(store: ResearchStore, patch: dict, *, author: str) -> dict:
         elif key == "timeframe":
             if item not in TIMEFRAME_SECONDS:
                 raise ValueError("timeframe must be one of " + ", ".join(TIMEFRAME_SECONDS))
+        elif key == "symbol_timeframes":
+            if (not isinstance(item, dict) or len(item) > 12
+                    or any(not isinstance(s, str) or tf not in TIMEFRAME_SECONDS for s, tf in item.items())):
+                raise ValueError("symbol_timeframes must map instrument names to " + ", ".join(TIMEFRAME_SECONDS))
         else:
             low, high = CONFIG_LIMITS[key]
             if isinstance(item, bool) or not isinstance(item, (int, float)) or not low <= item <= high:
@@ -221,7 +233,7 @@ class Autopilot:
     def resolve_open(self, symbol: str, candles: list[Candle]) -> int:
         resolved = 0
         spike, spike_range = self._spike_settings(symbol, candles)
-        step = TIMEFRAME_SECONDS[get_config(self.store)["timeframe"]]
+        step = TIMEFRAME_SECONDS[timeframe_for(get_config(self.store), symbol)]
         with self.store.journal.connect() as db:
             rows = [dict(r) for r in db.execute(
                 "SELECT decision_id,at,action,detail,arm FROM decisions WHERE symbol=? AND status='open'", (symbol,))]
@@ -257,10 +269,11 @@ class Autopilot:
 
     def _run_symbol(self, symbol: str) -> dict:
         config = get_config(self.store)
-        step = TIMEFRAME_SECONDS[config["timeframe"]]
+        timeframe = timeframe_for(config, symbol)
+        step = TIMEFRAME_SECONDS[timeframe]
         now = self.clock()
         try:
-            candles, meta = self.fetch(symbol, config["timeframe"], int(config["bars"]))
+            candles, meta = self.fetch(symbol, timeframe, int(config["bars"]))
         except Exception as exc:  # noqa: BLE001 - the loop must survive any data problem
             self.store.journal.log("autopilot.data_error", symbol, {"error": type(exc).__name__, "message": str(exc)[:200]})
             return {"symbol": symbol, "status": "data_error", "message": str(exc)[:200]}
@@ -314,6 +327,8 @@ class Autopilot:
             propose("rule:sma_cross", cross or "WAIT", {"rationale": "SMA 5/20 crossover on closed bars"})
             graph = graph_agent(closes)
             propose("det:graph", graph.action, {"rationale": graph.rationale})
+            coin = "BUY" if int(sha256(cycle_id.encode()).hexdigest(), 16) % 2 else "SELL"
+            propose("random:coin", coin, {"rationale": "seeded coin flip: the chance reference for the forced-direction arms"})
             self._model_arms(symbol, cycle_id, last, candles, config, propose, summary, now)
         self.store.state_set(f"autopilot_last_bar:{symbol}", last.closed_at.isoformat())
         self.store.journal.log("autopilot.cycle", cycle_id, summary)
@@ -358,7 +373,7 @@ class Autopilot:
             summary["models"] = "provider cannot project costs"
             return
         summary["models"] = "ran"
-        for variant in ("plain", "skills"):
+        for variant in ("plain", "skills", "forced"):
             answers: dict[str, Action] = {}
             used: list[str] = []
             for agent in voters:
@@ -366,7 +381,9 @@ class Autopilot:
                                       closed_prices=closes, headlines=headlines)
                 tag = prompt_tag(agent)
                 pack = {"skills": [], "sha256": ""}
-                if variant == "skills":
+                if variant in ("skills", "forced"):
+                    if variant == "forced":
+                        inputs["forced_direction"] = True  # same inputs and skills as the skills arm; only the answer rule differs
                     inputs["features"] = numeric
                     if agent == "news":
                         inputs["scheduled_us_announcements"] = upcoming
@@ -393,7 +410,7 @@ class Autopilot:
             arm = f"{variant}:director"
             action, reason = consensus(answers)
             detail = {"rationale": reason, "votes": {a: v.value for a, v in answers.items()},
-                      "variant": variant, "skills": used, "director": "consensus@0.2.0"}
+                      "variant": variant, "skills": sorted(set(used)), "director": "consensus@0.2.0"}
             if len(answers) < 2:
                 self._record(cycle_id, symbol, last.closed_at, arm, "WAIT", "model_failed", detail)
                 summary["arms"][arm] = "WAIT/model_failed"
@@ -457,9 +474,9 @@ class AutopilotRunner:
         if get_mode(store) != "observe":
             return
         config = get_config(store)
-        step = TIMEFRAME_SECONDS[config["timeframe"]]
         now = self.autopilot.clock()
         for symbol in config["symbols"]:
+            step = TIMEFRAME_SECONDS[timeframe_for(config, symbol)]
             if get_mode(store) != "observe":  # switched off while we were working
                 return
             if now < self._next_check.get(symbol, datetime.min.replace(tzinfo=timezone.utc)):

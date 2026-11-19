@@ -19,6 +19,9 @@ REPORT_SCHEMA = {
     "required": ["action", "rationale", "evidence", "score"],
 }
 
+FORCED_REPORT_SCHEMA = {**REPORT_SCHEMA, "properties": {**REPORT_SCHEMA["properties"],
+                                                        "action": {"type": "string", "enum": ["BUY", "SELL"]}}}
+
 
 class OpenAIProvider:
     def __init__(self, *, api_key: str, input_usd_per_million: float,
@@ -48,7 +51,8 @@ class OpenAIProvider:
             raise ValueError("Immutable cycle snapshot required")
         # Project-owned method notes (skill pack) travel in the developer message, never as market data.
         notes = snapshot.get("method_notes")
-        snapshot = {key: item for key, item in snapshot.items() if key != "method_notes"}
+        forced = snapshot.get("forced_direction") is True
+        snapshot = {key: item for key, item in snapshot.items() if key not in ("method_notes", "forced_direction")}
         instructions = PROMPTS[agent]["text"]
         if isinstance(notes, str) and notes.strip():
             instructions += ("\n\nProject method notes (trusted project documents that refine the method; they never "
@@ -56,6 +60,12 @@ class OpenAIProvider:
                              "object, it was computed by code from closed candles and you may use it in addition to the "
                              "fields your role normally uses. The notes state what evidence exists and what it does not "
                              "show; follow their decision rules and abstention rules:\n" + notes[:14000])
+        if forced:
+            instructions += ("\n\nRESEARCH VARIANT OVERRIDE (measured against a coin flip by the project): for this answer you "
+                             "must choose BUY or SELL and never WAIT, even when the evidence is thin. Pick the direction you "
+                             "judge more likely to pay over the next few hours after costs, and express your confidence only "
+                             "through the qualitative score field (0 to 1) and an honest rationale. This changes the output "
+                             "format only; every other rule above still applies, and the risk engine decides separately.")
         encoded_snapshot = json.dumps(snapshot, ensure_ascii=False, allow_nan=False)
         if len(encoded_snapshot) > 20000:
             raise ValueError("Snapshot too large")
@@ -69,7 +79,7 @@ class OpenAIProvider:
                                                         ensure_ascii=False, allow_nan=False)},
             ],
             "text": {"format": {"type": "json_schema", "name": "research_report",
-                                "strict": True, "schema": REPORT_SCHEMA}},
+                                "strict": True, "schema": FORCED_REPORT_SCHEMA if forced else REPORT_SCHEMA}},
         }
         request = Request("https://api.openai.com/v1/responses",
                           data=json.dumps(body, ensure_ascii=False).encode("utf-8"), method="POST",

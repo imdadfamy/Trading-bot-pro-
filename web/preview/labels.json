@@ -198,7 +198,12 @@
     "skills:graph": "Analyste graphique IA + compétences",
     "skills:quant": "Analyste quantitatif IA + compétences",
     "skills:news": "Veilleur IA + compétences",
-    "skills:director": "Directeur IA + compétences"
+    "skills:director": "Directeur IA + compétences",
+    "random:coin": "Pile ou face (référence du hasard)",
+    "forced:graph": "Analyste graphique IA, direction forcée",
+    "forced:quant": "Analyste quantitatif IA, direction forcée",
+    "forced:news": "Veilleur IA, direction forcée",
+    "forced:director": "Directeur IA, direction forcée"
   },
   "decisionStatus": {
     "wait": "attente (aucune position simulée)",

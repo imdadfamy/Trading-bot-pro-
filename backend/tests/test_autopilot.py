@@ -232,19 +232,21 @@ class CycleTests(unittest.TestCase):
             result = pilot.run_symbol("XAUUSD")
             self.assertEqual(result["status"], "ok")
             by_arm = {d["arm"]: d for d in decisions(store)}
-            self.assertEqual(set(by_arm), {"rule:sma_cross", "det:graph", "plain:graph", "plain:quant", "plain:news",
-                                           "plain:director", "skills:graph", "skills:quant", "skills:news",
-                                           "skills:director"})
+            self.assertEqual(set(by_arm), {"rule:sma_cross", "det:graph", "random:coin", "plain:graph", "plain:quant",
+                                           "plain:news", "plain:director", "skills:graph", "skills:quant", "skills:news",
+                                           "skills:director", "forced:graph", "forced:quant", "forced:news",
+                                           "forced:director"})
+            self.assertIn(by_arm["random:coin"]["action"], ("BUY", "SELL"))
             self.assertEqual(by_arm["det:graph"]["action"], "BUY")
             self.assertEqual(by_arm["plain:director"]["action"], "BUY")
             self.assertEqual(by_arm["plain:news"]["status"], "wait")
             self.assertEqual(by_arm["skills:director"]["status"], "open")
             plan = json.loads(by_arm["skills:director"]["detail"])["plan"]
             self.assertGreater(plan["stop_distance"], 0)
-            self.assertEqual(len(provider.calls), 6)
+            self.assertEqual(len(provider.calls), 9)
             # the same bar is never analysed twice
             self.assertEqual(pilot.run_symbol("XAUUSD")["status"], "no_new_bar")
-            self.assertEqual(len(provider.calls), 6)
+            self.assertEqual(len(provider.calls), 9)
             self.assertTrue(store.journal.verify_audit())
 
     def test_only_the_skills_arm_receives_features_and_method_notes(self):
@@ -253,8 +255,11 @@ class CycleTests(unittest.TestCase):
             store, pilot, _ = build(temp, {"XAUUSD": rising("XAUUSD")}, provider)
             pilot.run_symbol("XAUUSD")
             plain = [c for c in provider.calls if "features" not in c[1]]
-            skilled = [c for c in provider.calls if "features" in c[1]]
-            self.assertEqual((len(plain), len(skilled)), (3, 3))
+            skilled = [c for c in provider.calls if "features" in c[1] and not c[1].get("forced_direction")]
+            forced = [c for c in provider.calls if c[1].get("forced_direction")]
+            self.assertEqual((len(plain), len(skilled), len(forced)), (3, 3, 3))
+            self.assertTrue(all("features" in c[1] and c[1].get("method_notes") for c in forced))
+            self.assertTrue(all("forced_direction" not in c[1] for c in plain + skilled))
             self.assertTrue(all("method_notes" not in c[1] for c in plain))
             self.assertTrue(all(c[1].get("method_notes") for c in skilled))
             news = [c for c in skilled if c[0] == "news"][0]
@@ -287,12 +292,12 @@ class CycleTests(unittest.TestCase):
             state["candles"]["XAUUSD"] = rising("XAUUSD", end=LAST_CLOSE + STEP)
             result = pilot.run_symbol("XAUUSD")
             self.assertEqual(result["models"], "not due")
-            self.assertEqual(len(provider.calls), 6)
+            self.assertEqual(len(provider.calls), 9)
             self.assertEqual(len(decisions(store, status="skipped_open", arm="det:graph")), 1)
             clock["now"] = NOW + timedelta(minutes=31)
             state["candles"]["XAUUSD"] = rising("XAUUSD", end=LAST_CLOSE + STEP * 6)
             pilot.run_symbol("XAUUSD")
-            self.assertEqual(len(provider.calls), 12)
+            self.assertEqual(len(provider.calls), 18)
 
     def test_an_open_trade_resolves_from_the_next_real_bars(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -360,7 +365,7 @@ class CycleTests(unittest.TestCase):
             pilot.model_setup = lambda: "models unavailable: no model chosen in Settings"
             result = pilot.run_symbol("XAUUSD")
             self.assertEqual(result["models"], "models unavailable: no model chosen in Settings")
-            self.assertEqual({d["arm"] for d in decisions(store)}, {"rule:sma_cross", "det:graph"})
+            self.assertEqual({d["arm"] for d in decisions(store)}, {"rule:sma_cross", "det:graph", "random:coin"})
 
 
 class ModeAndRunnerTests(unittest.TestCase):
@@ -537,6 +542,88 @@ class HttpAndProviderTests(unittest.TestCase):
         self.assertNotIn("method_notes", user)
         provider.classify("graph", {"cycle_id": "c", "symbol": "XAUUSD"}, "m")
         self.assertNotIn("Project method notes", seen["body"]["input"][0]["content"])
+
+
+class ForcedAndDriftTests(unittest.TestCase):
+    def test_the_coin_is_seeded_by_the_cycle_and_balanced(self):
+        from hashlib import sha256
+        flips = [int(sha256(f"cycle-{i}".encode()).hexdigest(), 16) % 2 for i in range(400)]
+        self.assertTrue(150 < sum(flips) < 250)
+        with tempfile.TemporaryDirectory() as temp:
+            store, pilot, _ = build(temp, {"XAUUSD": rising("XAUUSD")})
+            pilot.run_symbol("XAUUSD")
+            coin = decisions(store, arm="random:coin")[0]
+            self.assertEqual(coin["status"], "open")  # a trade is simulated every cycle, the null reference
+
+    def test_forced_direction_changes_only_the_developer_message(self):
+        seen = []
+
+        class Response:
+            status = 200
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+            def read(self, size):
+                return json.dumps({"status": "completed", "output": [{"type": "message", "content": [
+                    {"type": "output_text", "text": json.dumps({"action": "BUY", "rationale": "x", "evidence": [],
+                                                                  "score": 0.4})}]}],
+                                   "usage": {"input_tokens": 10, "output_tokens": 5}}).encode()
+
+        def transport(request, *, timeout):
+            seen.append(json.loads(request.data))
+            return Response()
+        provider = OpenAIProvider(api_key="k", input_usd_per_million=2, output_usd_per_million=8, opener=transport)
+        provider.classify("graph", {"cycle_id": "c", "symbol": "XAUUSD", "forced_direction": True}, "m")
+        provider.classify("graph", {"cycle_id": "c", "symbol": "XAUUSD"}, "m")
+        forced_dev, forced_user = (m["content"] for m in seen[0]["input"])
+        normal_dev, _ = (m["content"] for m in seen[1]["input"])
+        self.assertIn("never WAIT", forced_dev)
+        self.assertIn("risk engine decides separately", forced_dev)
+        self.assertNotIn("forced_direction", forced_user)
+        self.assertNotIn("never WAIT", normal_dev)
+        # the forced call cannot even answer WAIT: the strict output schema only allows BUY or SELL
+        self.assertEqual(seen[0]["text"]["format"]["schema"]["properties"]["action"]["enum"], ["BUY", "SELL"])
+        self.assertEqual(seen[1]["text"]["format"]["schema"]["properties"]["action"]["enum"], ["BUY", "SELL", "WAIT"])
+
+    def test_forced_arms_are_compared_with_the_coin_and_flagged_when_underpowered(self):
+        with tempfile.TemporaryDirectory() as temp:
+            store = ResearchStore(str(Path(temp) / "t.db"))
+            helper = StatsTests()
+            helper.add(store, "forced:graph", "XAUUSD", "London", [1.0, 2.0, 1.5] * 14)
+            helper.add(store, "random:coin", "XAUUSD", "London", [-1.0, 1.0] * 21)
+            duel = autopilot_stats.performance(store)["forced_vs_random"]["graph"]
+            self.assertTrue(duel["clearly_helps"])
+            helper.add(store, "forced:quant", "XAUUSD", "London", [3.0, 3.0])
+            small = autopilot_stats.performance(store)["forced_vs_random"]["quant"]
+            self.assertTrue(small["underpowered"])
+            self.assertFalse(small["clearly_helps"])
+
+    def test_drift_switch_symbols_are_read_on_m1_bars_and_others_on_the_default(self):
+        with tempfile.TemporaryDirectory() as temp:
+            asked = []
+            store, pilot, state = build(temp, {"Drift Switch Index 20": rising("Drift Switch Index 20"),
+                                               "Volatility 10 Index": rising("Volatility 10 Index")})
+            inner = pilot.fetch
+            pilot.fetch = lambda symbol, timeframe, count: (asked.append((symbol, timeframe)) or inner(symbol, timeframe, count))
+            config = autopilot.get_config(store)
+            for symbol in ("Drift Switch Index 10", "Drift Switch Index 20", "Drift Switch Index 30"):
+                self.assertIn(symbol, config["symbols"])
+                self.assertEqual(autopilot.timeframe_for(config, symbol), "M1")
+            self.assertEqual(autopilot.timeframe_for(config, "Boom 500 Index"), "M5")
+            pilot.run_symbol("Drift Switch Index 20")
+            pilot.run_symbol("Volatility 10 Index")
+            self.assertEqual(asked, [("Drift Switch Index 20", "M1"), ("Volatility 10 Index", "M5")])
+            with self.assertRaises(ValueError):
+                autopilot.set_config(store, {"symbol_timeframes": {"XAUUSD": "W1"}}, author="t")
+            self.assertEqual(autopilot.set_config(store, {"symbol_timeframes": {"XAUUSD": "M15"}}, author="t")
+                             ["symbol_timeframes"], {"XAUUSD": "M15"})
+
+    def test_drift_skill_is_offered_only_for_drift_switch_and_features_carry_both_windows(self):
+        from trading_pro.autopilot_features import eligible_skills
+        self.assertIn("drift-regime-detection", {s["id"] for s in eligible_skills("quant", "Drift Switch Index 20")})
+        self.assertNotIn("drift-regime-detection", {s["id"] for s in eligible_skills("quant", "Boom 500 Index")})
+        data = features(rising("Drift Switch Index 20"))
+        self.assertIsNotNone(data["drift"]["t_statistic"])
+        self.assertEqual(data["drift_short"]["window_bars"], 20)
 
 
 class SettingsLevelTests(unittest.TestCase):
