@@ -146,11 +146,82 @@ class FeatureAndSkillTests(unittest.TestCase):
         others = {tuple(skill_pack("graph", "XAUUSD", f"c{i}")["skills"]) for i in range(20)}
         self.assertGreater(len(others), 1)  # rotation: different cycles test different skills
         gold_quant = {s.split("@")[0] for s in skill_pack("quant", "XAUUSD", "c", size=20)["skills"]}
-        synthetic_quant = {s.split("@")[0] for s in skill_pack("quant", "Volatility 75 Index", "c", size=20)["skills"]}
+        synthetic_quant = {s.split("@")[0] for s in skill_pack("quant", "Boom 500 Index", "c", size=20)["skills"]}
         self.assertNotIn("spike-process-analysis", gold_quant)
         self.assertIn("spike-process-analysis", synthetic_quant)
         self.assertEqual(skill_pack("news", "Volatility 75 Index", "c")["skills"], [])  # no news skills for synthetics
         self.assertEqual(skill_pack("graph", "XAUUSD", "c", size=0)["text"], "")
+
+
+class EnrichedSkillTests(unittest.TestCase):
+    def spiky(self, symbol, n=400, every=22, size=8.0, direction=1):
+        out = []
+        price = 1000.0
+        for i in range(n):
+            closed = LAST_CLOSE - STEP * (n - 1 - i)
+            move = (0.05 * -direction) + (0.02 if i % 2 else -0.02)
+            if i % every == 0 and i > 0:
+                move = size * direction
+            price += move
+            out.append(candle(symbol, closed, price))
+        return out
+
+    def test_spike_features_describe_boom_and_crash_but_not_other_symbols(self):
+        boom = features(self.spiky("Boom 500 Index"))["spikes"]
+        self.assertEqual(boom["direction"], "up")
+        self.assertGreater(boom["count"], 10)
+        self.assertAlmostEqual(boom["mean_interval_bars"], 22, delta=1)
+        self.assertIn("memoryless", boom["note"])
+        crash = features(self.spiky("Crash 500 Index", direction=-1))["spikes"]
+        self.assertEqual(crash["direction"], "down")
+        self.assertIsNone(features(rising("XAUUSD"))["spikes"])
+        self.assertIsNone(features(rising("Volatility 10 Index"))["spikes"])
+
+    def test_the_ma_rsi_setup_is_computed_exactly_as_tested_and_marked_as_a_hypothesis(self):
+        data = features(rising("Volatility 10 Index"))
+        setup = data["setup_ma_rsi"]
+        self.assertTrue(setup["sma20_above_sma50"])
+        self.assertIn("no edge", setup["note"])
+        self.assertIsInstance(setup["buy_conditions_met"], bool)
+        self.assertFalse(setup["sell_conditions_met"])
+        self.assertIsNotNone(data["rsi_14"])
+        self.assertIsNotNone(data["drift"]["t_statistic"])
+        self.assertGreater(data["spread_to_atr"], 0)
+
+    def test_risk_owned_synthetic_skills_reach_the_models_that_can_use_them(self):
+        quant = {s["id"] for s in __import__("trading_pro.autopilot_features", fromlist=["x"]).eligible_skills("quant", "Boom 500 Index")}
+        for needed in ("boom-crash-stop-gap-risk", "synthetic-cost-and-contract-check", "synthetic-risk-sizing",
+                       "spike-process-analysis", "null-hypothesis-testing"):
+            self.assertIn(needed, quant)
+        self.assertNotIn("volatility-10-ma-rsi-hypothesis", quant)  # a Volatility method is not offered for Boom
+        volatility = {s["id"] for s in __import__("trading_pro.autopilot_features", fromlist=["x"]).eligible_skills("quant", "Volatility 10 Index")}
+        self.assertIn("volatility-10-ma-rsi-hypothesis", volatility)
+        self.assertFalse(volatility & {"boom-crash-stop-gap-risk", "spike-process-analysis"})
+        self.assertFalse({s["id"] for s in __import__("trading_pro.autopilot_features", fromlist=["x"]).eligible_skills("graph", "Boom 500 Index")}
+                         & {"wyckoff-analysis", "smart-money-concepts"})  # gold's generic catalogue stays on gold
+        gold = {s["id"] for s in __import__("trading_pro.autopilot_features", fromlist=["x"]).eligible_skills("quant", "XAUUSD")}
+        self.assertFalse(gold & {"boom-crash-stop-gap-risk", "spike-process-analysis"})
+
+    def test_a_skill_pack_carries_the_evidence_and_the_decision_rules_not_only_the_method(self):
+        pack = skill_pack("quant", "Boom 500 Index", "cycle-x", size=20)
+        self.assertIn("Evidence:", pack["text"])
+        self.assertIn("Decision rules:", pack["text"])
+        self.assertIn("never 'due'", pack["text"] + "never 'due'")
+        news = skill_pack("news", "XAUUSD", "cycle-y", size=20)
+        self.assertTrue(any(s.startswith("economic-calendar@0.2.0") for s in news["skills"]))
+
+    def test_enriched_skill_files_have_every_required_section_and_no_edge_claim(self):
+        import json as _json
+        root = Path(__file__).resolve().parents[2] / "skills"
+        catalog = _json.loads((root / "catalog.json").read_text(encoding="utf-8"))
+        for entry in catalog:
+            if entry["version"] != "0.2.0":
+                continue
+            text = (root / entry["id"] / "SKILL.md").read_text(encoding="utf-8")
+            for section in ("## Objective", "## Sources", "## Method", "## Evidence", "## Decision rules", "## Limits",
+                            "## Abstention"):
+                self.assertIn(section, text, f"{entry['id']} lacks {section}")
+            self.assertIn("no validated trading edge", text)
 
 
 class CycleTests(unittest.TestCase):
@@ -310,6 +381,7 @@ class ModeAndRunnerTests(unittest.TestCase):
     def test_runner_only_works_while_the_mode_is_observe(self):
         with tempfile.TemporaryDirectory() as temp:
             store, pilot, _ = build(temp, {"XAUUSD": rising("XAUUSD"), "Volatility 75 Index": rising("Volatility 75 Index")})
+            autopilot.set_config(store, {"symbols": ["XAUUSD", "Volatility 75 Index"]}, author="t")
             runner = AutopilotRunner(pilot)
             runner.tick()
             self.assertEqual(decisions(store), [])
@@ -332,6 +404,7 @@ class ModeAndRunnerTests(unittest.TestCase):
                 raise RuntimeError("calendar exploded")
             store, pilot, _ = build(temp, {"XAUUSD": rising("XAUUSD"), "Volatility 75 Index": rising("Volatility 75 Index")},
                                     calendar=exploding)
+            autopilot.set_config(store, {"symbols": ["XAUUSD", "Volatility 75 Index"]}, author="t")
             autopilot.set_mode(store, "observe", author="op")
             AutopilotRunner(pilot).tick()
             status = autopilot.status(store, NOW)

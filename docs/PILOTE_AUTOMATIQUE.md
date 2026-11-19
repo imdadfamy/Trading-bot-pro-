@@ -31,7 +31,7 @@ python -m trading_pro.cli autopilot once --symbol XAUUSD
 ```
 
 ## Limites connues
-- Les compétences sont des spécifications génériques : leur effet mesuré dira lesquelles méritent d'être enrichies.
+- Les compétences ont été enrichies le 19 novembre 2026 (sources, mesures, règles de décision : voir `INDICES_SYNTHETIQUES.md`) ; leur effet mesuré dira lesquelles aident. Aucune méthode à rentabilité démontrée n'existe dans les sources lues : les compétences enseignent surtout à mesurer et à s'abstenir.
 - Les modèles répondent surtout « attente » : les premières heures donneront peu de positions mesurées ; il faut des jours pour conclure.
 - L'or est fermé la nuit et le week-end (données périmées ignorées) ; les annonces américaines suspendent l'analyse de l'or, pas celle des indices synthétiques.
 - Les **ordres automatiques en démo** (étape 3) ne sont pas encore branchés : le mode `demo_auto` est refusé.

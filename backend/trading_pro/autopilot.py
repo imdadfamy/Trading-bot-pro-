@@ -16,7 +16,7 @@ from datetime import datetime, timedelta, timezone
 from statistics import median
 from uuid import uuid4
 
-from .autopilot_features import atr, features, is_synthetic, skill_pack
+from .autopilot_features import atr, features, has_family_word, is_synthetic, skill_pack
 from .agents import graph_agent
 from .backtest import BacktestConfig, sma_signal
 from .core import Action, Report, Snapshot, utcnow
@@ -28,7 +28,7 @@ from .store import ResearchStore
 MODES = ("off", "observe")
 TIMEFRAME_SECONDS = {"M1": 60, "M5": 300, "M15": 900, "M30": 1800, "H1": 3600}
 DEFAULT_CONFIG = {
-    "symbols": ["Volatility 75 Index", "XAUUSD"], "timeframe": "M5", "bars": 300,
+    "symbols": ["Volatility 10 Index", "Boom 500 Index", "Crash 500 Index", "XAUUSD"], "timeframe": "M5", "bars": 300,
     "model_every_minutes": 30, "horizon_bars": 48, "stop_atr_multiple": 2.0, "reward_multiple": 2.0,
     "skill_pack_size": 3, "max_call_usd": 0.25,
 }
@@ -213,7 +213,7 @@ class Autopilot:
                               (symbol, arm)).fetchone() is not None
 
     def _spike_settings(self, symbol, candles):
-        spike = any(name in symbol.lower() for name in SPIKE_NAMES)
+        spike = has_family_word(symbol, SPIKE_NAMES)
         rng = 5.0 * median(c.high - c.low for c in candles) if spike and candles else float("inf")
         return spike, rng
 
@@ -373,7 +373,9 @@ class Autopilot:
                     pack = skill_pack(agent, symbol, cycle_id, size=int(config["skill_pack_size"]),
                                       **({"root": self.skills_root} if self.skills_root else {}))
                     if pack["text"]:
-                        inputs["method_notes"] = pack["text"]
+                        family = ("Instrument family: Deriv synthetic index (simulated, 24/7, no news channel)."
+                                  if is_synthetic(symbol) else "Instrument family: gold against the US dollar (XAUUSD).")
+                        inputs["method_notes"] = family + "\n\n" + pack["text"]
                     used += pack["skills"]
                 report = run_model(self.store, setup.provider, agent=agent, model=setup.models[agent],
                                    snapshot=inputs, budget=budget, projected_cost_usd=estimate(agent, inputs))

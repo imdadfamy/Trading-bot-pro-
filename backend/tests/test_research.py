@@ -98,9 +98,9 @@ class ResearchTests(unittest.TestCase):
             self.assertEqual(cycle["signal"].action.value, "WAIT")
             service = Service(path)
             skills = service.read("/skills")
-            self.assertEqual(len(skills), 34)
+            self.assertEqual(len(skills), 36)
             self.assertEqual(sum(1 for s in skills if s["scope"] == "core"), 27)  # the specified catalogue
-            self.assertEqual(sum(1 for s in skills if s["scope"] == "synthetic"), 7)  # synthetic-index additions
+            self.assertEqual(sum(1 for s in skills if s["scope"] == "synthetic"), 9)  # synthetic-index additions
             self.assertEqual(len(service.read("/signals")), 1)
             current = service.settings()
             self.assertEqual(current["version"], 0)

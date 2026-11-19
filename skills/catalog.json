@@ -147,9 +147,12 @@
     "id": "macroeconomic-analysis",
     "name": "Macroeconomic Analysis",
     "owner": "news",
-    "version": "0.1.0",
+    "version": "0.2.0",
     "state": "research_specification",
-    "scope": "core"
+    "scope": "core",
+    "agents": [
+      "news"
+    ]
   },
   {
     "id": "central-bank-intelligence",
@@ -163,9 +166,12 @@
     "id": "economic-calendar",
     "name": "Economic Calendar",
     "owner": "news",
-    "version": "0.1.0",
+    "version": "0.2.0",
     "state": "research_specification",
-    "scope": "core"
+    "scope": "core",
+    "agents": [
+      "news"
+    ]
   },
   {
     "id": "news-sentiment-analysis",
@@ -187,9 +193,12 @@
     "id": "institutional-flow",
     "name": "Institutional Flow",
     "owner": "news",
-    "version": "0.1.0",
+    "version": "0.2.0",
     "state": "research_specification",
-    "scope": "core"
+    "scope": "core",
+    "agents": [
+      "news"
+    ]
   },
   {
     "id": "market-psychology",
@@ -219,25 +228,46 @@
     "id": "synthetic-index-mechanics",
     "name": "Synthetic Index Mechanics",
     "owner": "quant",
-    "version": "0.1.0",
+    "version": "0.2.0",
     "state": "research_specification",
-    "scope": "synthetic"
+    "scope": "synthetic",
+    "agents": [
+      "quant",
+      "graph"
+    ]
   },
   {
     "id": "spike-process-analysis",
     "name": "Spike Process Analysis",
     "owner": "quant",
-    "version": "0.1.0",
+    "version": "0.2.0",
     "state": "research_specification",
-    "scope": "synthetic"
+    "scope": "synthetic",
+    "agents": [
+      "quant",
+      "graph"
+    ],
+    "families": [
+      "boom",
+      "crash",
+      "jump",
+      "dex"
+    ]
   },
   {
     "id": "drift-regime-detection",
     "name": "Drift Regime Detection",
     "owner": "quant",
-    "version": "0.1.0",
+    "version": "0.2.0",
     "state": "research_specification",
-    "scope": "synthetic"
+    "scope": "synthetic",
+    "agents": [
+      "quant",
+      "graph"
+    ],
+    "families": [
+      "drift"
+    ]
   },
   {
     "id": "constant-volatility-validation",
@@ -251,24 +281,65 @@
     "id": "synthetic-cost-and-contract-check",
     "name": "Synthetic Cost And Contract Check",
     "owner": "risk",
-    "version": "0.1.0",
+    "version": "0.2.0",
     "state": "research_specification",
-    "scope": "synthetic"
+    "scope": "synthetic",
+    "agents": [
+      "quant",
+      "graph"
+    ]
   },
   {
     "id": "null-hypothesis-testing",
     "name": "Null Hypothesis Testing",
     "owner": "quant",
-    "version": "0.1.0",
+    "version": "0.2.0",
     "state": "research_specification",
-    "scope": "synthetic"
+    "scope": "synthetic",
+    "agents": [
+      "quant"
+    ]
   },
   {
     "id": "synthetic-risk-sizing",
     "name": "Synthetic Risk Sizing",
     "owner": "risk",
-    "version": "0.1.0",
+    "version": "0.2.0",
     "state": "research_specification",
-    "scope": "synthetic"
+    "scope": "synthetic",
+    "agents": [
+      "quant"
+    ]
+  },
+  {
+    "id": "boom-crash-stop-gap-risk",
+    "name": "Boom and Crash Stop Gap Risk",
+    "owner": "risk",
+    "version": "0.2.0",
+    "state": "research_specification",
+    "scope": "synthetic",
+    "agents": [
+      "quant",
+      "graph"
+    ],
+    "families": [
+      "boom",
+      "crash"
+    ]
+  },
+  {
+    "id": "volatility-10-ma-rsi-hypothesis",
+    "name": "Volatility 10 Moving Average and RSI Hypothesis",
+    "owner": "quant",
+    "version": "0.2.0",
+    "state": "research_specification",
+    "scope": "synthetic",
+    "agents": [
+      "quant",
+      "graph"
+    ],
+    "families": [
+      "volatility"
+    ]
   }
 ]

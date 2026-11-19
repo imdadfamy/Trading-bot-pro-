@@ -15,14 +15,19 @@ from statistics import mean
 from .market import Candle, session_label
 
 SKILLS_ROOT = Path(__file__).resolve().parents[2] / "skills"
-SECTIONS = ("Objective", "Method", "Limits", "Abstention")
-MAX_NOTE_CHARS = 1800  # per skill
+SECTIONS = ("Objective", "Method", "Evidence", "Decision rules", "Limits", "Abstention")
+MAX_NOTE_CHARS = 3200  # per skill
 SYNTHETIC_HINTS = ("volatility", "boom", "crash", "step", "jump", "range break", "dex", "drift")
+SPIKE_FAMILIES = ("boom", "crash", "jump", "dex")
+
+
+def has_family_word(symbol: str, names=SPIKE_FAMILIES) -> bool:
+    """Whole-word match: the word "Index" must not be read as the DEX family."""
+    return any(re.search(rf"\b{name}\b", symbol.lower()) for name in names)
 
 
 def is_synthetic(symbol: str) -> bool:
-    lowered = symbol.lower()
-    return any(hint in lowered for hint in SYNTHETIC_HINTS)
+    return has_family_word(symbol, SYNTHETIC_HINTS)
 
 
 def atr(candles: list[Candle], period: int = 14) -> float | None:
@@ -43,6 +48,81 @@ def _swings(candles: list[Candle], width: int = 3) -> tuple[list[float], list[fl
         if candles[i].low == min(c.low for c in window):
             lows.append(candles[i].low)
     return highs, lows
+
+
+def rsi(closes: list[float], period: int = 14) -> float | None:
+    if len(closes) < period + 1:
+        return None
+    gains = losses = 0.0
+    for a, b in zip(closes[-period - 1:-1], closes[-period:]):
+        gains += max(b - a, 0.0)
+        losses += max(a - b, 0.0)
+    return 100.0 if losses == 0 else round(100 - 100 / (1 + gains / losses), 2)
+
+
+def spike_stats(candles: list[Candle], k: float = 5.0) -> dict | None:
+    """Spikes of a Boom/Crash/Jump/DEX style index: description only (a spike is never 'due')."""
+    symbol = candles[-1].symbol.lower()
+    if not has_family_word(symbol) or len(candles) < 110:
+        return None
+    direction = "up" if "boom" in symbol else "down" if "crash" in symbol else "both"
+    closes = [c.close for c in candles]
+    moves = [closes[i] / closes[i - 1] - 1 for i in range(1, len(closes))]
+    flagged, sizes = [], []
+    for i in range(101, len(closes)):
+        recent = sorted(abs(x) for x in moves[i - 101:i - 1])
+        scale = recent[len(recent) // 2] or 1e-12
+        ratio = moves[i - 1] / scale
+        hit = ratio >= k if direction == "up" else ratio <= -k if direction == "down" else abs(ratio) >= k
+        if hit:
+            flagged.append(i)
+            sizes.append(abs(moves[i - 1]))
+    gaps = [b - a for a, b in zip(flagged, flagged[1:])]
+    sizes.sort()
+    return {"direction": direction, "window_bars": len(closes) - 101, "count": len(flagged),
+            "mean_interval_bars": round(mean(gaps), 2) if gaps else None,
+            "bars_since_last_spike": (len(closes) - 1 - flagged[-1]) if flagged else None,
+            "median_move_pct": round(sizes[len(sizes) // 2] * 100, 4) if sizes else None,
+            "p90_move_pct": round(sizes[int(0.9 * (len(sizes) - 1))] * 100, 4) if sizes else None,
+            "enough_for_statistics": len(flagged) >= 30,
+            "note": "description only: spike waiting times behave like a memoryless process"}
+
+
+def ma_rsi_setup(candles: list[Candle], value: float | None) -> dict | None:
+    """Conditions of the circulated SMA20/SMA50 + RSI14 swing method, exactly as the project tested it."""
+    closes = [c.close for c in candles]
+    if len(closes) < 60 or not value:
+        return None
+    s20, s50 = mean(closes[-20:]), mean(closes[-50:])
+    since = None
+    for back in range(0, 100):
+        end = len(closes) - back
+        if end < 51:
+            break
+        now_up = mean(closes[end - 20:end]) > mean(closes[end - 50:end])
+        before_up = mean(closes[end - 21:end - 1]) > mean(closes[end - 51:end - 1])
+        if now_up != before_up:
+            since = back
+            break
+    r = rsi(closes)
+    prev = candles[-1]
+    p20 = mean(closes[-21:-1])
+    tolerance = 0.2 * mean(c.high - c.low for c in candles[-14:])
+    recent_cross = since is not None and since <= 30
+    buy = bool(recent_cross and s20 > s50 and r is not None and 50 < r < 70 and prev.low <= p20 + tolerance and prev.close > p20)
+    sell = bool(recent_cross and s20 < s50 and r is not None and 30 < r < 50 and prev.high >= p20 - tolerance and prev.close < p20)
+    return {"sma20": round(s20, 6), "sma50": round(s50, 6), "sma20_above_sma50": s20 > s50, "bars_since_cross": since,
+            "rsi14": r, "buy_conditions_met": buy, "sell_conditions_met": sell,
+            "note": "hypothesis only: the project's own test found no edge against random entries"}
+
+
+def drift_stats(closes: list[float], window: int = 60) -> dict | None:
+    if len(closes) < window + 1:
+        return None
+    moves = [closes[i] / closes[i - 1] - 1 for i in range(len(closes) - window, len(closes))]
+    deviation = (sum((x - mean(moves)) ** 2 for x in moves) / (len(moves) - 1)) ** 0.5
+    t = mean(moves) / (deviation / len(moves) ** 0.5) if deviation > 0 else None
+    return {"window_bars": window, "mean_return_per_bar": round(mean(moves), 8), "t_statistic": round(t, 2) if t is not None else None}
 
 
 def features(candles: list[Candle]) -> dict:
@@ -74,7 +154,10 @@ def features(candles: list[Candle]) -> dict:
         "swing_highs": [round(h, 6) for h in highs[-3:]], "swing_lows": [round(l, 6) for l in lows[-3:]],
         "structure": structure,
         "tick_volume_ratio": round(last.tick_volume / mean(volumes), 3) if volumes and mean(volumes) > 0 else None,
-        "spread": round(spread, 6), "session": session_label(last.closed_at),
+        "spread": round(spread, 6), "spread_to_atr": round(spread / value, 4) if value else None,
+        "rsi_14": rsi([c.close for c in candles]), "drift": drift_stats([c.close for c in candles]),
+        "spikes": spike_stats(candles), "setup_ma_rsi": ma_rsi_setup(candles, value),
+        "session": session_label(last.closed_at),
         "last_closed_at": last.closed_at.isoformat(),
         "candles_ohlcv": [[c.open, c.high, c.low, c.close, c.tick_volume] for c in candles[-40:]],
     }
@@ -97,12 +180,12 @@ def eligible_skills(agent: str, symbol: str, root: Path = SKILLS_ROOT) -> list[d
     synthetic = is_synthetic(symbol)
     chosen = []
     for entry in catalog:
-        if entry["owner"] != agent:
+        if agent not in entry.get("agents", [entry["owner"]]):
             continue
-        if entry.get("scope") == "synthetic" and not synthetic:
-            continue
-        if synthetic and entry.get("scope") != "synthetic" and agent == "news":
-            continue
+        if synthetic != (entry.get("scope") == "synthetic"):
+            continue  # synthetic indices get synthetic skills only; gold gets the core catalogue
+        if entry.get("families") and not has_family_word(symbol, tuple(entry["families"])):
+            continue  # a skill about spikes is not offered for a constant-volatility index
         chosen.append(entry)
     return chosen
 

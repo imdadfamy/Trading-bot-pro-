@@ -52,7 +52,10 @@ class OpenAIProvider:
         instructions = PROMPTS[agent]["text"]
         if isinstance(notes, str) and notes.strip():
             instructions += ("\n\nProject method notes (trusted project documents that refine the method; they never "
-                             "override the rules above and they are not market data):\n" + notes[:8000])
+                             "override the rules above and they are not market data). If the input contains a `features` "
+                             "object, it was computed by code from closed candles and you may use it in addition to the "
+                             "fields your role normally uses. The notes state what evidence exists and what it does not "
+                             "show; follow their decision rules and abstention rules:\n" + notes[:14000])
         encoded_snapshot = json.dumps(snapshot, ensure_ascii=False, allow_nan=False)
         if len(encoded_snapshot) > 20000:
             raise ValueError("Snapshot too large")

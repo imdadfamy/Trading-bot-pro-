@@ -137,3 +137,18 @@ Paramètres fixés à l'avance : pic = bougie dont le mouvement vaut au moins 5 
 - **Le backtest de base de la décision 038 était trop favorable sur ces deux indices** : en exécution prudente, Boom passe de 1,02 à 0,96 et Crash de 1,10 à 1,02 ; Volatility 75, sans pics, ne change pas.
 
 Limites : 17 jours ; commissions, swaps et glissement supposés nuls ; une exécution de stop « au pire de la bougie » est un cadre prudent, pas une mesure ; les pics sont détectés à l'échelle de la bougie de 5 minutes, pas du tick ; un seul jeu de paramètres fixés à l'avance.
+
+## Recherche vérifiée le 19 novembre 2026 (Volatility 10, Boom, Crash)
+
+Ce qui est établi par les sources lues et ce que nos propres mesures confirment ou infirment.
+
+| Sujet | Sources lues | Nos mesures (compte démo, vraies bougies) | Conséquence pour les agents |
+|---|---|---|---|
+| Volatility 10 : versions 1 s et 2 s | Deriv : séries indépendantes, ne bougent pas ensemble | écart médian 0,162 (2 s) et 0,33 (1 s) | ne jamais mélanger leurs statistiques |
+| Boom / Crash : pics | Deriv : chaque tick est indépendant, un pic n'est pas « dû » | Boom 1000 et Crash 1000 sur 50 000 bougies M1 : intervalles compatibles avec un processus sans mémoire (coefficient de variation 0,996 et 0,950 contre 0,977 et 0,976 attendus ; tests p = 0,25 et 0,67 ; risque de pic identique après attente courte ou longue) | le temps écoulé depuis le dernier pic n'apporte aucune information |
+| Boom / Crash : stop | Deriv : un stop est un déclencheur, pas un prix garanti ; vente sur Boom et achat sur Crash exposés ; exemple de Deriv : risque prévu 5 $, perte réelle 12,50 $ (illustratif) ; étude externe : 13 stops sur 13 exécutés après le pic | pic médian 0,107 % du prix, 90e centile 0,21 %, soit environ neuf fois l'amplitude moyenne d'une bougie M1 | un stop plus serré que le pic est sauté : le risque réel est supérieur au risque prévu |
+| Méthode « moyennes 20/50 + RSI » sur Volatility 10 | PDF publié par Deriv (auteur : Vince Stanzione) : H1 ou H4, croisement SMA 20/50, RSI 14 entre 50 et 70 (achat) ou 30 et 50 (vente), repli sur la SMA 20. Le guide ne donne aucun backtest de cette méthode ; l'affiliation à Deriv est déclarée dans un autre ebook du même auteur, pas dans le texte de ce PDF | notre test d'une lecture figée à l'avance : facteur de profit 0,84 (2 s, H1) et 1,14 (1 s, H1), espérance -0,11 R et +0,09 R, aucune ne bat les entrées aléatoires (p = 0,72 ; 0,33 ; 0,74 ; 0,22) ; les périodes de test sont négatives | traitée comme une hypothèse, mesurée par l'expérience, sans avantage démontré |
+| Recherche indépendante (Orphy123/deriv-research) | dépôt public, protocole pré-enregistré : hypothèse « dérive après pic » falsifiée sur Boom 1000 et Crash 1000, filtre de régime abandonné | recoupe nos mesures | aucune règle Boom/Crash n'est recommandée |
+| Étude d'un vendeur d'EA (MQL5) | 1 578 variantes, 53 symboles, correction de Holm : aucun survivant sur Volatility, Boom, Crash ; seul Drift Switch 10/20/30 passe (environ 8 à 10 points de base nets par trade, deux fois le coût), sans test en avant, avec conflit d'intérêt | non testé : Drift Switch n'était pas dans nos instruments | hypothèse à tester, jamais une preuve |
+
+Conclusion honnête : aucune méthode de « bon trader » dont la rentabilité sur Volatility 10, Boom et Crash soit démontrée et reproductible après coûts n'a été trouvée, ni dans les sources, ni dans nos mesures. Les compétences enrichies apprennent donc aux agents à **mesurer et à s'abstenir correctement** ; l'expérience dira si leur manière d'analyser apporte quelque chose.
