@@ -41,7 +41,7 @@ def rising(symbol, end=LAST_CLOSE, n=300, slope=0.1):
 
 class FakeProvider:
     def __init__(self, answers=None, fail=False):
-        self.answers = answers or {"graph": "BUY", "quant": "BUY", "news": "WAIT"}
+        self.answers = answers or {"graph": "BUY", "quant": "BUY", "news": "WAIT", "director": "WAIT"}
         self.fail, self.calls = fail, []
 
     def estimate_cost(self, agent, snapshot):
@@ -51,7 +51,7 @@ class FakeProvider:
         self.calls.append((agent, dict(snapshot), model))
         if self.fail:
             raise RuntimeError("provider down")
-        return ({"action": self.answers[agent], "rationale": "test", "evidence": ["closed_candle_closes"],
+        return ({"action": self.answers.get(agent, "WAIT"), "rationale": "test", "evidence": ["closed_candle_closes"],
                  "score": None}, {"input_tokens": 100, "output_tokens": 50, "cost_usd": 0.002})
 
 
@@ -236,7 +236,7 @@ class CycleTests(unittest.TestCase):
             self.assertEqual(set(by_arm), {"rule:sma_cross", "det:graph", "random:coin", "plain:graph", "plain:quant",
                                            "plain:news", "plain:director", "skills:graph", "skills:quant", "skills:news",
                                            "skills:director", "forced:graph", "forced:quant", "forced:news",
-                                           "forced:director"})
+                                           "forced:director", "ai:director"})
             self.assertIn(by_arm["random:coin"]["action"], ("BUY", "SELL"))
             self.assertEqual(by_arm["det:graph"]["action"], "BUY")
             self.assertEqual(by_arm["plain:director"]["action"], "BUY")
@@ -244,10 +244,10 @@ class CycleTests(unittest.TestCase):
             self.assertEqual(by_arm["skills:director"]["status"], "open")
             plan = json.loads(by_arm["skills:director"]["detail"])["plan"]
             self.assertGreater(plan["stop_distance"], 0)
-            self.assertEqual(len(provider.calls), 9)
+            self.assertEqual(len(provider.calls), 10)
             # the same bar is never analysed twice
             self.assertEqual(pilot.run_symbol("XAUUSD")["status"], "no_new_bar")
-            self.assertEqual(len(provider.calls), 9)
+            self.assertEqual(len(provider.calls), 10)
             self.assertTrue(store.journal.verify_audit())
 
     def test_only_the_skills_arm_receives_features_and_method_notes(self):
@@ -255,7 +255,7 @@ class CycleTests(unittest.TestCase):
             provider = FakeProvider()
             store, pilot, _ = build(temp, {"XAUUSD": rising("XAUUSD")}, provider)
             pilot.run_symbol("XAUUSD")
-            plain = [c for c in provider.calls if "features" not in c[1]]
+            plain = [c for c in provider.calls if "features" not in c[1] and c[0] != "director"]
             skilled = [c for c in provider.calls if "features" in c[1] and not c[1].get("forced_direction")]
             forced = [c for c in provider.calls if c[1].get("forced_direction")]
             self.assertEqual((len(plain), len(skilled), len(forced)), (3, 3, 3))
@@ -293,12 +293,12 @@ class CycleTests(unittest.TestCase):
             state["candles"]["XAUUSD"] = rising("XAUUSD", end=LAST_CLOSE + STEP)
             result = pilot.run_symbol("XAUUSD")
             self.assertEqual(result["models"], "not due")
-            self.assertEqual(len(provider.calls), 9)
+            self.assertEqual(len(provider.calls), 10)
             self.assertEqual(len(decisions(store, status="skipped_open", arm="det:graph")), 1)
             clock["now"] = NOW + timedelta(minutes=31)
             state["candles"]["XAUUSD"] = rising("XAUUSD", end=LAST_CLOSE + STEP * 6)
             pilot.run_symbol("XAUUSD")
-            self.assertEqual(len(provider.calls), 18)
+            self.assertEqual(len(provider.calls), 20)
 
     def test_an_open_trade_resolves_from_the_next_real_bars(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -782,6 +782,148 @@ class LimitsTests(unittest.TestCase):
             runner.tick()
             self.assertEqual(runner._next_check["Boom 500 Index"], late + timedelta(seconds=60))
             self.assertEqual(runner._next_check["XAUUSD"], late + timedelta(seconds=300))
+
+
+class AIDirectorTests(unittest.TestCase):
+    PINNED = "234a286a16541da26370ad9ad13b9a969e2d1b7bd791925ce32bd9afdfe52912"
+
+    def calls_of(self, provider, agent="director"):
+        return [c for c in provider.calls if c[0] == agent]
+
+    def test_the_director_prompt_is_frozen_like_the_analysts_prompts(self):
+        from trading_pro.prompts import prompt_fingerprint, prompt_tag
+        self.assertEqual(prompt_tag("director"), "prompt:director@1.0.0")
+        self.assertEqual(prompt_fingerprint("director"), self.PINNED)  # a change must bump the version and this hash
+
+    def test_it_reads_this_consultations_reports_and_no_account_data(self):
+        with tempfile.TemporaryDirectory() as temp:
+            provider = FakeProvider({"graph": "BUY", "quant": "BUY", "news": "WAIT", "director": "BUY"})
+            store, pilot, _ = build(temp, {"XAUUSD": rising("XAUUSD")}, provider)
+            pilot.run_symbol("XAUUSD")
+            (_, inputs, model), = self.calls_of(provider)
+            self.assertEqual(set(inputs["reports"]), {"graph", "quant", "news"})
+            self.assertEqual(inputs["reports"]["graph"]["action"], "BUY")
+            self.assertEqual(set(inputs["baselines"]), {"rule_sma_cross", "det_graph"})
+            self.assertGreater(inputs["cost"]["stop_distance"], 0)
+            self.assertIn("cost_in_r", inputs["cost"])
+            self.assertIn("rsi_14", inputs["indicators"])
+            self.assertIn("history", inputs)  # gold has persistence: a (here empty) history is supplied
+            self.assertEqual(model, "m")
+            blob = json.dumps(inputs).lower()
+            for secret in ("password", "equity", "balance", "login", "api_key"):
+                self.assertNotIn(secret, blob)
+            arm = decisions(store, arm="ai:director")[0]
+            self.assertEqual((arm["action"], arm["status"]), ("BUY", "open"))
+            detail = json.loads(arm["detail"])
+            self.assertEqual(detail["relied_on"], ["graph", "news", "quant"])
+            self.assertEqual(detail["prompt"], "prompt:director@1.0.0")
+            self.assertTrue(detail["skills"])
+
+    def test_history_is_given_only_where_the_instrument_has_persistence(self):
+        for symbol, expected in (("XAUUSD", True), ("Drift Switch Index 20", True), ("Boom 500 Index", False),
+                                 ("Crash 500 Index", False), ("Volatility 10 Index", False)):
+            with tempfile.TemporaryDirectory() as temp:
+                provider = FakeProvider()
+                store, pilot, _ = build(temp, {symbol: rising(symbol)}, provider)
+                pilot.run_symbol(symbol)
+                (_, inputs, _), = self.calls_of(provider)
+                self.assertEqual("history" in inputs, expected, symbol)
+
+    def test_the_history_is_the_previous_consultations_votes_and_prices_newest_first(self):
+        with tempfile.TemporaryDirectory() as temp:
+            clock = {"now": NOW}
+            provider = FakeProvider({"graph": "BUY", "quant": "BUY", "news": "WAIT", "director": "WAIT"})
+            store, pilot, state = build(temp, {"XAUUSD": rising("XAUUSD")}, provider, clock=lambda: clock["now"])
+            pilot.run_symbol("XAUUSD")
+            for k in (1, 2):
+                clock["now"] = NOW + timedelta(minutes=31 * k)
+                state["candles"]["XAUUSD"] = rising("XAUUSD", end=LAST_CLOSE + STEP * 7 * k)
+                pilot.run_symbol("XAUUSD")
+            history = pilot._history("XAUUSD")
+            self.assertEqual(len(history), 3)
+            self.assertGreater(history[0]["at"], history[1]["at"])
+            self.assertEqual(history[0]["votes"]["graph"], "BUY")
+            self.assertEqual(set(history[0]["votes"]) - {"graph", "quant", "news", "director", "ai_director"}, set())
+            last_call = self.calls_of(provider)[-1][1]
+            self.assertEqual(len(last_call["history"]), 2)  # the two earlier consultations, not the current one
+
+    def test_it_is_a_failure_not_an_analysis_when_there_is_nothing_to_reconcile(self):
+        with tempfile.TemporaryDirectory() as temp:
+            provider = FakeProvider(fail=True)
+            store, pilot, _ = build(temp, {"XAUUSD": rising("XAUUSD")}, provider)
+            pilot.run_symbol("XAUUSD")
+            row = decisions(store, arm="ai:director")[0]
+            self.assertEqual(row["status"], "model_failed")
+            self.assertEqual(self.calls_of(provider), [])  # no call is wasted without analyst answers
+
+    def test_it_falls_back_to_the_graph_model_and_its_own_model_when_set(self):
+        with tempfile.TemporaryDirectory() as temp:
+            provider = FakeProvider()
+            store, pilot, _ = build(temp, {"XAUUSD": rising("XAUUSD")}, provider)
+            pilot.model_setup = ModelSetup(provider, {"graph": "gm", "quant": "qm", "news": "nm", "director": "dm"},
+                                           Budget(100, 100, 0.25))
+            pilot.run_symbol("XAUUSD")
+            self.assertEqual(self.calls_of(provider)[0][2], "dm")
+        with tempfile.TemporaryDirectory() as temp:
+            provider = FakeProvider()
+            store, pilot, _ = build(temp, {"XAUUSD": rising("XAUUSD")}, provider)
+            pilot.model_setup = ModelSetup(provider, {"graph": "gm", "quant": "qm", "news": "nm"}, Budget(100, 100, 0.25))
+            pilot.run_symbol("XAUUSD")
+            self.assertEqual(self.calls_of(provider)[0][2], "gm")
+
+    def test_it_can_be_chosen_as_an_execution_arm_but_is_not_the_default(self):
+        with tempfile.TemporaryDirectory() as temp:
+            store = ResearchStore(str(Path(temp) / "t.db"))
+            self.assertEqual(autopilot.get_config(store)["execution_arms"], ["skills:director"])
+            self.assertEqual(autopilot.set_config(store, {"execution_arms": ["ai:director"]}, author="t")["execution_arms"],
+                             ["ai:director"])
+
+    def test_the_provider_sends_the_director_prompt_and_its_method_notes(self):
+        seen = []
+
+        class Response:
+            status = 200
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+            def read(self, size):
+                return json.dumps({"status": "completed", "output": [{"type": "message", "content": [
+                    {"type": "output_text", "text": json.dumps({"action": "WAIT", "rationale": "x", "evidence": [],
+                                                                  "score": None})}]}],
+                                   "usage": {"input_tokens": 10, "output_tokens": 5}}).encode()
+
+        def transport(request, *, timeout):
+            seen.append(json.loads(request.data))
+            return Response()
+        from trading_pro.prompts import DIRECTOR_PROMPT
+        provider = OpenAIProvider(api_key="k", input_usd_per_million=2, output_usd_per_million=8, opener=transport)
+        snapshot = {"cycle_id": "c", "symbol": "XAUUSD", "method_notes": "NOTE-TEXT"}
+        provider.classify("director", snapshot, "m")
+        developer = seen[0]["input"][0]["content"]
+        self.assertTrue(developer.startswith(DIRECTOR_PROMPT["text"]))
+        self.assertIn("NOTE-TEXT", developer)
+        self.assertGreater(provider.estimate_cost("director", snapshot), 0)
+        with self.assertRaises(ValueError):
+            provider.classify("risk", snapshot, "m")
+
+    def test_director_skills_are_cost_and_hypothesis_discipline_for_synthetics_and_the_calendar_for_gold(self):
+        from trading_pro.autopilot_features import eligible_skills
+        synthetic = {s["id"] for s in eligible_skills("director", "Boom 500 Index")}
+        self.assertTrue({"synthetic-cost-and-contract-check", "null-hypothesis-testing", "boom-crash-stop-gap-risk"} <= synthetic)
+        gold = {s["id"] for s in eligible_skills("director", "XAUUSD")}
+        self.assertTrue({"economic-calendar", "macroeconomic-analysis"} <= gold)
+        self.assertFalse(gold & synthetic)
+
+    def test_statistics_compare_the_ai_director_with_the_vote_and_the_coin(self):
+        with tempfile.TemporaryDirectory() as temp:
+            store = ResearchStore(str(Path(temp) / "t.db"))
+            helper = StatsTests()
+            helper.add(store, "ai:director", "XAUUSD", "London", [1.0, 2.0, 1.5] * 14)
+            helper.add(store, "skills:director", "XAUUSD", "London", [-0.5, 0.5] * 21)
+            helper.add(store, "random:coin", "XAUUSD", "London", [-1.0, 1.0] * 21)
+            report = autopilot_stats.performance(store)["ai_director_vs"]
+            self.assertTrue(report["vs_vote"]["clearly_helps"])
+            self.assertTrue(report["vs_coin"]["clearly_helps"])
+            self.assertEqual(autopilot_stats.performance(ResearchStore(str(Path(temp) / "e.db")))["ai_director_vs"], {})
 
 
 class SettingsLevelTests(unittest.TestCase):

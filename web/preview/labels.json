@@ -211,7 +211,8 @@
     "forced:graph": "Analyste graphique IA, direction forcée",
     "forced:quant": "Analyste quantitatif IA, direction forcée",
     "forced:news": "Veilleur IA, direction forcée",
-    "forced:director": "Directeur IA, direction forcée"
+    "forced:director": "Directeur IA, direction forcée",
+    "ai:director": "Directeur IA (lit tous les rapports)"
   },
   "decisionStatus": {
     "wait": "attente (aucune position simulée)",

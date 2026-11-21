@@ -73,7 +73,7 @@ AUREUS = ("MQL5 blog post 'Strategy Variants on Synthetic Indices' (read 19 Nov 
 SKILLS = [
     {
         "id": "spike-process-analysis", "name": "Spike Process Analysis", "owner": "quant", "scope": "synthetic",
-        "agents": ["quant", "graph"], "families": ["boom", "crash", "jump", "dex"],
+        "agents": ["quant", "graph", "director"], "families": ["boom", "crash", "jump", "dex"],
         "objective": "Characterise the spike process of Boom, Crash, DEX and Jump indices (rate, direction, size) and decide whether the time since the last spike carries any information.",
         "sources": DERIV_ACADEMY + " " + ORPHY + " " + AUREUS,
         "inputs": "features.spikes (count, mean interval in bars, bars since last spike, median and p90 spike move), closed candles, family",
@@ -87,7 +87,7 @@ SKILLS = [
     },
     {
         "id": "boom-crash-stop-gap-risk", "name": "Boom and Crash Stop Gap Risk", "owner": "risk", "scope": "synthetic",
-        "agents": ["quant", "graph"], "families": ["boom", "crash"],
+        "agents": ["quant", "graph", "director"], "families": ["boom", "crash"],
         "objective": "Measure how far a stop can be jumped by a spike so that risk is judged on the possible loss, not on the requested stop distance.",
         "sources": DERIV_ACADEMY + " " + AUREUS,
         "inputs": "features.spikes (p90 spike move), features.atr_14, spread, stop distance, side, family",
@@ -115,7 +115,7 @@ SKILLS = [
     },
     {
         "id": "drift-regime-detection", "name": "Drift Regime Detection", "owner": "quant", "scope": "synthetic",
-        "agents": ["quant", "graph"], "families": ["drift"],
+        "agents": ["quant", "graph", "director"], "families": ["drift"],
         "objective": "Detect whether a Drift Switch (or any drifting synthetic) index is in an up, down or sideways drift, and whether staying with the drift pays after costs.",
         "sources": "Deriv, 'Synthetic indices' (read 18 Nov 2026): Drift Switching indices alternate between up, down and sideways trends, changing every 10, 20 or 30 minutes on average. Symbols present on the project's demo account: Drift Switch Index 10, 20 and 30. " + AUREUS + " " + ORPHY,
         "inputs": "features.drift (60 bars) and features.drift_short (20 bars): mean return per bar and t statistic; SMA 20/50 relation; closed candles. Drift Switch indices are read on M1 bars",
@@ -129,7 +129,7 @@ SKILLS = [
     },
     {
         "id": "synthetic-cost-and-contract-check", "name": "Synthetic Cost and Contract Check", "owner": "risk", "scope": "synthetic",
-        "agents": ["quant", "graph"],
+        "agents": ["quant", "graph", "director"],
         "objective": "Check that costs (spread, slippage, commission) are small relative to the move the idea needs, using the instrument's measured contract data.",
         "sources": "MetaTrader 5 contract data and bar spreads read from the project's Deriv demo account (read-only), 19 Nov 2026. " + AUREUS,
         "inputs": "features.spread, features.spread_to_atr, stop distance, target distance, minimum lot, contract size",
@@ -143,7 +143,7 @@ SKILLS = [
     },
     {
         "id": "null-hypothesis-testing", "name": "Null Hypothesis Testing", "owner": "quant", "scope": "synthetic",
-        "agents": ["quant"],
+        "agents": ["quant", "director"],
         "objective": "Keep every claim of an edge honest by testing it against random entries and counting every variant tried.",
         "sources": "Project rule bench (backend/trading_pro/synthetic_rules.py) and the multiple-testing practice of the sources read: " + AUREUS + " Deriv states that notable historical patterns on these indices can be chance.",
         "inputs": "trade ledger of a rule, number of variants tried, chronological periods",
@@ -157,7 +157,7 @@ SKILLS = [
     },
     {
         "id": "synthetic-risk-sizing", "name": "Synthetic Risk Sizing", "owner": "risk", "scope": "synthetic",
-        "agents": ["quant"],
+        "agents": ["quant", "director"],
         "objective": "Size a position from the money at risk, the real stop distance and the contract rules, and reject what the minimum lot cannot respect.",
         "sources": "Project risk engine and MetaTrader 5 order checks on the demo account, 18 Nov 2026; " + DERIV_ACADEMY,
         "inputs": "equity, risk fraction, stop distance, tick size and value, volume min/step/max, features.spikes",
@@ -186,7 +186,7 @@ SKILLS = [
     # ---- core (gold) skills
     {
         "id": "economic-calendar", "name": "Economic Calendar", "owner": "news", "scope": "core",
-        "agents": ["news"],
+        "agents": ["news", "director"],
         "objective": "Decide when scheduled announcements make new entries on gold unwise, without guessing the direction of the reaction.",
         "sources": "U.S. Bureau of Labor Statistics release schedule (Employment Situation and Consumer Price Index, published at 08:30 Eastern; schedule page for November 2026 cited in the operator's research); Federal Reserve FOMC calendar. A study of gold futures cited in the operator's research associates some announcements with higher volatility and transaction costs (not re-read by the project). Project data: config/us_events.json, 90 announcements to January 2028.",
         "inputs": "scheduled_us_announcements (kind, time), observed_at, features.spread and atr",
@@ -200,7 +200,7 @@ SKILLS = [
     },
     {
         "id": "macroeconomic-analysis", "name": "Macroeconomic Analysis", "owner": "news", "scope": "core",
-        "agents": ["news"],
+        "agents": ["news", "director"],
         "objective": "Use real interest rates and the dollar as slow context for gold, never as a minute-level entry signal.",
         "sources": "Chicago Fed Letter No. 464, 'What Drives Gold Prices?' (2021; cited in the operator's research, not re-read by the project): relationship between gold and real interest rates. FRED daily series that fit: DFII10 (10-year inflation-indexed Treasury yield) and DTWEXBGS (broad U.S. dollar index).",
         "inputs": "macro context fields when supplied (real yield, dollar index and their changes), otherwise none",

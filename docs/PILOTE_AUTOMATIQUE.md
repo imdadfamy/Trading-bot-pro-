@@ -17,6 +17,7 @@
 | Agents IA + compétences | mêmes agents, avec indicateurs calculés par code (ATR, RSI, dérive, pics, swings, fourchette, volume) et 3 compétences tirées au sort à chaque cycle |
 | Agents IA + compétences, direction forcée | mêmes données, mais l'analyste doit choisir achat ou vente ; comparé au pile ou face |
 | Pile ou face | achat ou vente tiré au hasard à chaque cycle : la référence du hasard |
+| **Directeur IA** (`ai:director`) | une IA qui lit **tous les rapports** de la consultation (analystes, règles de base, coût en R, indicateurs, annonces) et tranche ; pour l'or et les Drift Switch seulement, elle voit aussi les 4 consultations précédentes (votes et prix) pour vérifier qu'une dérive persiste. Elle ignore l'historique sur Boom, Crash et Volatility (sans mémoire). Comparée au directeur par vote et au pile ou face ; n'est pas l'ordre par défaut |
 
 Pour chaque méthode : nombre de positions, R moyen (gain ou perte en multiple du risque initial), réussite, abstention, appels IA en échec. Rien n'est dit « significatif » sans 30 positions au moins et un intervalle corrigé au-dessus de zéro. Les écarts avec/sans compétences sont calculés par agent et par compétence (écran « Agents IA »), les résultats par session dans « Sessions ».
 

@@ -151,7 +151,8 @@
     "state": "research_specification",
     "scope": "core",
     "agents": [
-      "news"
+      "news",
+      "director"
     ]
   },
   {
@@ -170,7 +171,8 @@
     "state": "research_specification",
     "scope": "core",
     "agents": [
-      "news"
+      "news",
+      "director"
     ]
   },
   {
@@ -245,7 +247,8 @@
     "scope": "synthetic",
     "agents": [
       "quant",
-      "graph"
+      "graph",
+      "director"
     ],
     "families": [
       "boom",
@@ -263,7 +266,8 @@
     "scope": "synthetic",
     "agents": [
       "quant",
-      "graph"
+      "graph",
+      "director"
     ],
     "families": [
       "drift"
@@ -286,7 +290,8 @@
     "scope": "synthetic",
     "agents": [
       "quant",
-      "graph"
+      "graph",
+      "director"
     ]
   },
   {
@@ -297,7 +302,8 @@
     "state": "research_specification",
     "scope": "synthetic",
     "agents": [
-      "quant"
+      "quant",
+      "director"
     ]
   },
   {
@@ -308,7 +314,8 @@
     "state": "research_specification",
     "scope": "synthetic",
     "agents": [
-      "quant"
+      "quant",
+      "director"
     ]
   },
   {
@@ -320,7 +327,8 @@
     "scope": "synthetic",
     "agents": [
       "quant",
-      "graph"
+      "graph",
+      "director"
     ],
     "families": [
       "boom",

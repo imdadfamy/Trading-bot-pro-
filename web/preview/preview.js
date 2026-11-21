@@ -189,6 +189,16 @@ function performanceCards(perf) {
     `forcée : R moyen ${num(d.mean_r_with)} (${d.n_with}) · pile ou face : ${num(d.mean_r_without)} (${d.n_without})${d.difference_interval ? ` · écart ${num(d.difference)} [${num(d.difference_interval[0])} ; ${num(d.difference_interval[1])}]` : ""}`,
     d.clearly_helps ? "BAT LE HASARD" : d.clearly_hurts ? "PIRE QUE LE HASARD" : d.underpowered ? "TROP PEU DE DONNÉES" : "INDISTINGUABLE DU HASARD"])));
   out.push(forced);
+  const useDir = dir.ai_director_vs && Object.keys(dir.ai_director_vs).length;
+  const duel = useDir ? dir.ai_director_vs : (perf.ai_director_vs || {});
+  const aiCard = card("Le directeur IA fait-il mieux que le vote ?");
+  append(aiCard, info("Le directeur IA lit tous les rapports de la consultation (et un court historique pour l'or et les Drift Switch). On le compare au directeur par vote (deux analystes d'accord) et au pile ou face. Aucune avance n'est accordée : il faut au moins 30 observations et un intervalle au-dessus de zéro."));
+  const duelRows = [["vs_vote", "contre le directeur par vote"], ["vs_coin", "contre le pile ou face"]];
+  if (!Object.keys(duel).length) append(aiCard, empty("Pas encore de données."));
+  duelRows.forEach(([key, label]) => { const d = duel[key]; if (!d) return;
+    append(aiCard, row([`Directeur IA ${label}`, `directeur IA : ${num(d.mean_r_with)} (${d.n_with}) · autre : ${num(d.mean_r_without)} (${d.n_without})${d.difference_interval ? ` · écart ${num(d.difference)} [${num(d.difference_interval[0])} ; ${num(d.difference_interval[1])}]` : ""}`,
+      d.clearly_helps ? "MEILLEUR" : d.clearly_hurts ? "PIRE" : d.underpowered ? "TROP PEU DE DONNÉES" : "INDISTINGUABLE"])); });
+  out.push(aiCard);
   return out;
 }
 function sessionCard(perf) {

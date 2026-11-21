@@ -121,6 +121,9 @@ def performance(store: ResearchStore, symbol: str | None = None) -> dict:
         forced = group("forced", agent)
         if forced or random_values:
             forced_vs_random[agent] = _difference(forced, random_values, 4)
+    ai = group("ai", "director")
+    ai_director_vs = {"vs_vote": _difference(ai, group("skills", "director"), 2),
+                      "vs_coin": _difference(ai, random_values, 2)} if ai else {}
     skill_ids = sorted({s.split("@")[0] for r in resolved if r["arm"].startswith("skills:")
                         and r["arm"] != "skills:director" for s in r["detail"].get("skills", [])})
     skill_effects = []
@@ -138,7 +141,8 @@ def performance(store: ResearchStore, symbol: str | None = None) -> dict:
     return {
         "scope": symbol or "all", "resolved_trades": len(resolved), "arms": by_arm,
         "by_arm_session": by_arm_session, "by_arm_symbol": by_arm_symbol,
-        "skills_vs_plain": skills_vs_plain, "forced_vs_random": forced_vs_random, "skill_effects": skill_effects,
+        "skills_vs_plain": skills_vs_plain, "forced_vs_random": forced_vs_random, "ai_director_vs": ai_director_vs,
+        "skill_effects": skill_effects,
         "direction": direction_performance(store),
         "reading_guide": (
             "R = gain or loss as a multiple of the initial stop distance, after spread. Intervals are widened for the "
@@ -166,7 +170,10 @@ def direction_performance(store: ResearchStore) -> dict:
         return [r["score"] for r in rows if r["arm"] == arm]
 
     out = {"observations": len(rows), "arms": {arm: summarize(values(arm), max(len(arms), 1)) for arm in arms},
-           "skills_vs_plain": {}, "forced_vs_random": {}}
+           "skills_vs_plain": {}, "forced_vs_random": {}, "ai_director_vs": {}}
+    if values("ai:director"):
+        out["ai_director_vs"] = {"vs_vote": _difference(values("ai:director"), values("skills:director"), 2),
+                                 "vs_coin": _difference(values("ai:director"), values("random:coin"), 2)}
     for agent in ("graph", "quant", "news", "director"):
         plain, skilled, forced = values(f"plain:{agent}"), values(f"skills:{agent}"), values(f"forced:{agent}")
         if plain or skilled:

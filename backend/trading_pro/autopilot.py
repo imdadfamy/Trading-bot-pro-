@@ -23,12 +23,12 @@ from .backtest import BacktestConfig, sma_signal
 from .core import Action, Limits, Report, Snapshot, utcnow
 from .market import Candle, session_label
 from .models import Budget, run_model
-from .prompts import build_inputs, prompt_tag
+from .prompts import DIRECTOR_AGENT, build_director_inputs, build_inputs, prompt_tag
 from .store import ResearchStore
 
 MODES = ("off", "observe", "demo_auto")
 DEMO_AUTO_PHRASE = "ACTIVER LES ORDRES AUTOMATIQUES DEMO"
-ARM_NAMES = {"rule:sma_cross", "det:graph", "random:coin", *(f"{v}:{a}" for v in ("plain", "skills", "forced")
+ARM_NAMES = {"rule:sma_cross", "det:graph", "random:coin", "ai:director", *(f"{v}:{a}" for v in ("plain", "skills", "forced")
                                                            for a in ("graph", "quant", "news", "director"))}
 TIMEFRAME_SECONDS = {"M1": 60, "M5": 300, "M15": 900, "M30": 1800, "H1": 3600}
 DEFAULT_CONFIG = {
@@ -382,6 +382,7 @@ class Autopilot:
 
         cycle_id = str(uuid4())
         self.store.snapshot(Snapshot(cycle_id, symbol, last.bid, last.ask, last.closed_at, last.broker))
+        baselines = {}
         synthetic = is_synthetic(symbol)
         halt = ""
         if not synthetic:
@@ -429,9 +430,10 @@ class Autopilot:
             propose("rule:sma_cross", cross or "WAIT", {"rationale": "SMA 5/20 crossover on closed bars"})
             graph = graph_agent(closes)
             propose("det:graph", graph.action, {"rationale": graph.rationale})
+            baselines.update({"rule_sma_cross": cross or "WAIT", "det_graph": graph.action.value})
             coin = "BUY" if int(sha256(cycle_id.encode()).hexdigest(), 16) % 2 else "SELL"
             propose("random:coin", coin, {"rationale": "seeded coin flip: the chance reference for the forced-direction arms"})
-            self._model_arms(symbol, cycle_id, last, candles, config, propose, summary, scored)
+            self._model_arms(symbol, cycle_id, last, candles, config, propose, summary, scored, plan, baselines)
             if get_mode(self.store) == "demo_auto" and self.executor is not None and plan is not None:
                 self._execute_arms(symbol, cycle_id, plan, step, config, summary, now)
         self.store.state_set(f"autopilot_last_bar:{symbol}", last.closed_at.isoformat())
@@ -439,6 +441,59 @@ class Autopilot:
         beat = self.heartbeat()
         self._beat(cycles=beat.get("cycles", 0) + 1, last_cycle={**beat.get("last_cycle", {}), symbol: summary})
         return {"symbol": symbol, "status": "halted" if halt else "ok", **summary}
+
+    # -- the AI director: reads every report of the consultation (and a short history where it means something)
+    PERSISTENT = ("drift",)
+
+    def _history(self, symbol: str, limit: int = 4, exclude_cycle: str | None = None) -> list[dict]:
+        with self.store.journal.connect() as db:
+            cycles = [r["cycle_id"] for r in db.execute(
+                "SELECT DISTINCT cycle_id FROM decisions WHERE symbol=? AND arm='skills:director' AND cycle_id<>? "
+                "ORDER BY at DESC LIMIT ?", (symbol, exclude_cycle or "", limit))]
+            rows = []
+            for cycle in cycles:
+                votes = {("ai_director" if r["arm"] == "ai:director" else r["arm"].split(":")[1]): r["action"] for r in db.execute(
+                    "SELECT arm, action FROM decisions WHERE cycle_id=? AND arm IN "
+                    "('skills:graph','skills:quant','skills:news','skills:director','ai:director')", (cycle,))}
+                at = db.execute("SELECT at FROM decisions WHERE cycle_id=? LIMIT 1", (cycle,)).fetchone()["at"]
+                snap = db.execute("SELECT payload FROM snapshots WHERE cycle_id=?", (cycle,)).fetchone()
+                price = json.loads(snap["payload"]).get("bid") if snap else None
+                rows.append({"at": at, "votes": votes, "price": price})
+        return rows
+
+    def _ai_director(self, setup, symbol, cycle_id, last, plan, numeric, upcoming, skills_reports, baselines, config,
+                     propose, summary, budget):
+        arm = f"ai:{DIRECTOR_AGENT}"
+        detail = {"variant": "director", "prompt": prompt_tag(DIRECTOR_AGENT), "relied_on": sorted(skills_reports)}
+        if len(skills_reports) < 2 or plan is None:
+            self._record(cycle_id, symbol, last.closed_at, arm, "WAIT", "model_failed",
+                         {**detail, "rationale": "fewer than two analyst answers to reconcile"})
+            summary["arms"][arm] = "WAIT/model_failed"
+            return
+        persistent = (not is_synthetic(symbol)) or has_family_word(symbol, self.PERSISTENT)
+        keep = ("atr_14", "atr_percentile", "structure", "rsi_14", "drift", "drift_short", "spikes", "setup_ma_rsi",
+                "spread_to_atr", "session")
+        indicators = {k: numeric.get(k) for k in keep} if numeric.get("available") else {}
+        inputs = build_director_inputs(
+            cycle_id=cycle_id, symbol=symbol, observed_at=last.closed_at, reports=skills_reports, baselines=baselines,
+            plan=plan, spread=max(last.ask - last.bid, 0.0), indicators=indicators, announcements=upcoming,
+            history=self._history(symbol, exclude_cycle=cycle_id) if persistent else None)
+        pack = skill_pack(DIRECTOR_AGENT, symbol, cycle_id, size=int(config["skill_pack_size"]),
+                          **({"root": self.skills_root} if self.skills_root else {}))
+        family = ("Instrument family: Deriv synthetic index (simulated, 24/7, no news channel)." if is_synthetic(symbol)
+                  else "Instrument family: gold against the US dollar (XAUUSD).")
+        inputs["method_notes"] = family + ("\n\n" + pack["text"] if pack["text"] else "")
+        estimate = setup.provider.estimate_cost
+        model = setup.models.get(DIRECTOR_AGENT) or setup.models["graph"]
+        report = run_model(self.store, setup.provider, agent=DIRECTOR_AGENT, model=model, snapshot=inputs,
+                           budget=budget, projected_cost_usd=estimate(DIRECTOR_AGENT, inputs))
+        detail.update(rationale=report.rationale[:600], evidence=list(report.evidence)[:8], score=report.score,
+                      model=model, skills=pack["skills"], skills_sha256=pack["sha256"], history_used=persistent)
+        if report.rationale in FAILURE_RATIONALES:
+            self._record(cycle_id, symbol, last.closed_at, arm, "WAIT", "model_failed", detail)
+            summary["arms"][arm] = "WAIT/model_failed"
+            return
+        propose(arm, report.action, detail)
 
     # -- automatic demo orders
     def _execute_arms(self, symbol, cycle_id, plan, step, config, summary, now) -> None:
@@ -483,7 +538,7 @@ class Autopilot:
             return self.executor.reconcile(self.store, now=self.clock(), offset_hours=self.offset_hours)
 
     # -- model arms
-    def _model_arms(self, symbol, cycle_id, last, candles, config, propose, summary, scored):
+    def _model_arms(self, symbol, cycle_id, last, candles, config, propose, summary, scored, plan=None, baselines=None):
         setup = self.model_setup() if callable(self.model_setup) else self.model_setup
         if isinstance(setup, str):
             summary["models"] = setup
@@ -516,6 +571,7 @@ class Autopilot:
             summary["models"] = "provider cannot project costs"
             return
         summary["models"] = "ran"
+        skills_reports: dict[str, Report] = {}
         for variant in ("plain", "skills", "forced"):
             answers: dict[str, Action] = {}
             used: list[str] = []
@@ -549,6 +605,8 @@ class Autopilot:
                     summary["arms"][arm] = "WAIT/model_failed"
                     continue
                 answers[agent] = report.action
+                if variant == "skills":
+                    skills_reports[agent] = report
                 propose(arm, report.action, detail)
             arm = f"{variant}:director"
             action, reason = consensus(answers)
@@ -559,6 +617,8 @@ class Autopilot:
                 summary["arms"][arm] = "WAIT/model_failed"
             else:
                 propose(arm, action, detail)
+        self._ai_director(setup, symbol, cycle_id, last, plan, numeric, upcoming, skills_reports, baselines or {}, config,
+                          propose, summary, budget)
 
 
 FAILURE_RATIONALES = {

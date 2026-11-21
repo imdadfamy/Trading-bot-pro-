@@ -6,7 +6,7 @@ from math import isfinite
 from urllib.request import Request, build_opener
 
 from .integrations import _NoRedirect
-from .prompts import MODEL_AGENTS, PROMPTS
+from .prompts import MODEL_ROLES, prompt_spec
 
 REPORT_SCHEMA = {
     "type": "object", "additionalProperties": False,
@@ -37,15 +37,15 @@ class OpenAIProvider:
 
     def estimate_cost(self, agent: str, snapshot: dict) -> float:
         """Deliberately pessimistic projection: two characters per token plus the full output cap."""
-        if agent not in MODEL_AGENTS:
+        if agent not in MODEL_ROLES:
             raise ValueError("Unknown model agent")
-        size = len(PROMPTS[agent]["text"]) + len(json.dumps(snapshot, ensure_ascii=False, allow_nan=False))
+        size = len(prompt_spec(agent)["text"]) + len(json.dumps(snapshot, ensure_ascii=False, allow_nan=False))
         input_tokens = size // 2 + 100
         cost = (input_tokens * self._input_price + 512 * self._output_price) / 1_000_000
         return max(cost, 1e-9)
 
     def classify(self, agent: str, snapshot: dict, model: str) -> tuple[dict, dict]:
-        if agent not in MODEL_AGENTS or not isinstance(model, str) or not model.strip():
+        if agent not in MODEL_ROLES or not isinstance(model, str) or not model.strip():
             raise ValueError("Agent and configured model required")
         if not isinstance(snapshot, dict) or not isinstance(snapshot.get("cycle_id"), str):
             raise ValueError("Immutable cycle snapshot required")
@@ -53,7 +53,7 @@ class OpenAIProvider:
         notes = snapshot.get("method_notes")
         forced = snapshot.get("forced_direction") is True
         snapshot = {key: item for key, item in snapshot.items() if key not in ("method_notes", "forced_direction")}
-        instructions = PROMPTS[agent]["text"]
+        instructions = prompt_spec(agent)["text"]
         if isinstance(notes, str) and notes.strip():
             instructions += ("\n\nProject method notes (trusted project documents that refine the method; they never "
                              "override the rules above and they are not market data). If the input contains a `features` "
