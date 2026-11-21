@@ -163,5 +163,43 @@ class AccountTests(unittest.TestCase):
             self.assertEqual(Service(str(Path(temp) / "t.db")).dashboard()["account"]["balance"], 9999.28)
 
 
+class OverviewTests(unittest.TestCase):
+    def test_one_card_per_configured_instrument_with_family_price_votes_and_positions(self):
+        with tempfile.TemporaryDirectory() as temp:
+            store, pilot, _ = build(temp, {"XAUUSD": rising("XAUUSD"), "Boom 500 Index": rising("Boom 500 Index")}, FakeProvider())
+            autopilot.set_config(store, {"symbols": ["XAUUSD", "Boom 500 Index", "Drift Switch Index 20", "Volatility 10 Index",
+                                                     "Crash 500 Index"]}, author="t")
+            pilot.run_symbol("XAUUSD")
+            pilot.run_symbol("Boom 500 Index")
+            store.record_order(decision_id="o1", symbol="XAUUSD", arm="skills:director", side="BUY", state="open", opened_at=NOW,
+                               volume=0.16, entry=2000.0, stop_loss=1997.0, take_profit=2006.0, position_ticket=1)
+            cards = {c["symbol"]: c for c in Service(str(Path(temp) / "t.db")).read("/market/overview")["instruments"]}
+            self.assertEqual({k: v["family"] for k, v in cards.items()},
+                             {"XAUUSD": "gold", "Boom 500 Index": "boom", "Drift Switch Index 20": "drift",
+                              "Volatility 10 Index": "volatility", "Crash 500 Index": "crash"})
+            gold = cards["XAUUSD"]
+            self.assertEqual(gold["timeframe"], "M5")
+            self.assertEqual(len(gold["closes"]), 60)
+            self.assertAlmostEqual(gold["price"], gold["closes"][-1])
+            self.assertGreater(gold["change_pct"], 0)  # a rising series
+            self.assertEqual(gold["votes"]["graph"]["action"], "BUY")
+            self.assertEqual(gold["real_positions"][0]["side"], "BUY")
+            self.assertGreater(gold["shadow_open"], 0)
+            self.assertEqual(gold["status"], "waiting")  # the status comes from the pilot's heartbeat, none here
+            self.assertEqual(autopilot.timeframe_for(autopilot.get_config(store), "Drift Switch Index 20"), "M1")
+            self.assertEqual(cards["Drift Switch Index 20"]["timeframe"], "M1")
+            empty = cards["Crash 500 Index"]
+            self.assertEqual((empty["closes"], empty["price"], empty["change_pct"], empty["votes"]), ([], None, None, {}))
+
+    def test_the_interface_files_are_there_and_the_removed_app_is_not(self):
+        web = ROOT / "web"
+        for name in ("index.html", "preview.js", "preview.css", "labels.json"):
+            self.assertTrue((web / "preview" / name).is_file(), name)
+        for gone in ("app", "package.json", "tsconfig.json"):
+            self.assertFalse((web / gone).exists(), gone)
+        ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+        self.assertNotIn("npm", ci)
+
+
 if __name__ == "__main__":
     unittest.main()

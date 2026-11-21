@@ -130,6 +130,50 @@ class Service:
         self.store.journal.log("settings.changed", "settings", {"version": version, "author": author})
         return {"version": version}
 
+    def overview(self) -> dict:
+        """One card per instrument: price, recent closes, pilot status, latest answers, open positions."""
+        from . import autopilot
+        from .autopilot_features import has_family_word, is_synthetic
+        config = autopilot.get_config(self.store)
+        beat = json.loads(self.store.state_get("autopilot_heartbeat") or "{}")
+        cards = []
+        with self.store.journal.connect() as db:
+            for symbol in config["symbols"]:
+                rows = db.execute("SELECT payload FROM candles WHERE symbol=? AND broker<>'SYNTHETIC-NOT-A-BROKER' "
+                                  "ORDER BY closed_at DESC LIMIT 60", (symbol,)).fetchall()
+                bars = [json.loads(r["payload"]) for r in reversed(rows)]
+                closes = [b["close"] for b in bars]
+                votes = {}
+                for role, arm in self.VOTE_ARMS.items():
+                    row = db.execute("SELECT action, at FROM decisions WHERE symbol=? AND arm=? AND status<>'model_failed' "
+                                     "ORDER BY at DESC LIMIT 1", (symbol, arm)).fetchone()
+                    if row:
+                        votes[role] = dict(row)
+                shadow_open = db.execute("SELECT COUNT(*) FROM decisions WHERE symbol=? AND status='open'", (symbol,)).fetchone()[0]
+                real = [dict(r) for r in db.execute(
+                    "SELECT side, volume, entry, stop_loss, take_profit, opened_at FROM auto_orders "
+                    "WHERE symbol=? AND state='open'", (symbol,))]
+                if not is_synthetic(symbol):
+                    family = "gold"
+                elif has_family_word(symbol, ("boom",)):
+                    family = "boom"
+                elif has_family_word(symbol, ("crash",)):
+                    family = "crash"
+                elif has_family_word(symbol, ("drift",)):
+                    family = "drift"
+                else:
+                    family = "volatility"
+                last_cycle = (beat.get("last_cycle") or {}).get(symbol, {})
+                cards.append({
+                    "symbol": symbol, "family": family, "timeframe": autopilot.timeframe_for(config, symbol),
+                    "closes": closes[-60:], "price": closes[-1] if closes else None,
+                    "change_pct": round((closes[-1] / closes[0] - 1) * 100, 3) if len(closes) > 1 and closes[0] else None,
+                    "last_bar": bars[-1]["closed_at"] if bars else None,
+                    "status": (beat.get("symbol_status") or {}).get(symbol, {}).get("status", "waiting"),
+                    "session": last_cycle.get("session"), "halt": last_cycle.get("halt") or "",
+                    "votes": votes, "shadow_open": shadow_open, "real_positions": real})
+        return {"instruments": cards}
+
     def candles_view(self, query: dict) -> dict:
         """Bars of ONE instrument (the pilot stores several), real ones first; fictitious example bars only as a fallback."""
         from . import autopilot
@@ -169,6 +213,8 @@ class Service:
             return {"snapshot": self.store.latest_snapshot(), "live": False}
         if path == "/market/candles":
             return self.candles_view(query)
+        if path == "/market/overview":
+            return self.overview()
         if path == "/news/events":
             from .core import utcnow
             return self.store.news_as_of(utcnow())

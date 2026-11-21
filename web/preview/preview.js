@@ -70,25 +70,139 @@ function labeled(container, values) { const section=node("div","stats"); for (co
 async function get(path, options) { const response=await fetch(path,{cache:"no-store",...options}); const result=await response.json(); if(!response.ok) throw new Error(result.error || `HTTP ${response.status}`); return result; }
 function freshness(snapshot) { if(!snapshot) return "Aucune cotation"; const time=Date.parse(snapshot.observed_at); if(!Number.isFinite(time)) return "Horodatage invalide"; const age=Math.round((Date.now()-time)/1000); return age < 0 ? "Horloge incohérente" : `${age} s depuis la clôture enregistrée`; }
 let chartSymbol = null;
-function chart(history) {
+
+function svgEl(tag, attrs) { const e = document.createElementNS("http://www.w3.org/2000/svg", tag); for (const [k, v] of Object.entries(attrs || {})) e.setAttribute(k, String(v)); return e; }
+function setStyle(el, props) { if (el && el.style) Object.assign(el.style, props); }
+const FAMILY = { gold: "OR", volatility: "VOLATILITÉ", boom: "BOOM", crash: "CRASH", drift: "DRIFT" };
+const STATUS_DOT = { ok: "live", no_new_bar: "live", halted: "warn", stale: "warn", waiting: "", data_error: "bad" };
+const STATUS_TEXT = { ok: "analyse à jour", no_new_bar: "analyse à jour", halted: "annonce américaine : prudence", stale: "marché fermé ou données anciennes", waiting: "pas encore analysé", data_error: "données indisponibles" };
+const tone = n => (typeof n === "number" ? (n > 0 ? "pos" : n < 0 ? "neg" : "") : "");
+function signed(n, digits = 2) { return typeof n === "number" ? (n > 0 ? "+" : "") + n.toLocaleString("fr-FR", { maximumFractionDigits: digits }) : "—"; }
+function tile(label, val, sub, kind, valueClass) {
+  const item = node("div", `tile ${kind || ""}`);
+  append(item, node("div", "t-label", label), node("div", `t-value ${valueClass || ""}`, val), node("div", "t-sub", sub || ""));
+  return item;
+}
+function sparkline(values, up) {
+  const svg = svgEl("svg", { viewBox: "0 0 200 54", class: "spark", preserveAspectRatio: "none", "aria-hidden": "true" });
+  if (!Array.isArray(values) || values.length < 2) return svg;
+  const low = Math.min(...values), high = Math.max(...values), span = high - low || 1;
+  const pts = values.map((v, i) => `${(i / (values.length - 1) * 200).toFixed(1)},${(50 - (v - low) / span * 46).toFixed(1)}`);
+  const color = up ? "#22c58b" : "#ef4444";
+  svg.appendChild(svgEl("polygon", { points: `0,54 ${pts.join(" ")} 200,54`, fill: color }));
+  svg.appendChild(svgEl("polyline", { points: pts.join(" "), stroke: color }));
+  return svg;
+}
+function voteChip(label, vote) {
+  const act = vote ? vote.action : null;
+  const kind = act === "BUY" ? "buy" : act === "SELL" ? "sell" : act === "WAIT" ? "wait" : "";
+  const mark = act === "BUY" ? "▲" : act === "SELL" ? "▼" : act === "WAIT" ? "•" : "–";
+  const chip = node("span", `chip ${kind}`, `${label} ${mark}`);
+  chip.title = act ? `${label} : ${action(act)} (${when(vote.at)})` : `${label} : pas encore d'avis`;
+  return chip;
+}
+function instrumentCard(inst, selected, onPick) {
+  const button = node("button", `inst${selected ? " selected" : ""}`);
+  button.type = "button";
+  const head = node("div", "i-head");
+  const name = node("div", "i-name"); append(name, node("span", `dot ${STATUS_DOT[inst.status] ?? ""}`), node("span", "", inst.symbol));
+  append(head, name, node("span", "tag", FAMILY[inst.family] || inst.family.toUpperCase()));
+  const price = node("div", "i-price");
+  append(price, node("strong", "", typeof inst.price === "number" ? inst.price.toLocaleString("fr-FR", { maximumFractionDigits: 3 }) : "—"),
+    node("span", tone(inst.change_pct), typeof inst.change_pct === "number" ? `${signed(inst.change_pct, 2)} %` : ""));
+  const chips = node("div", "chips");
+  [["G", "graph"], ["Q", "quant"], ["N", "news"], ["Vote", "director"], ["IA", "ai_director"]].forEach(([label, key]) => {
+    if (key === "news" && inst.family !== "gold") return;
+    append(chips, voteChip(label, (inst.votes || {})[key]));
+  });
+  const foot = node("div", "i-foot");
+  const real = (inst.real_positions || []).map(p => `${action(p.side)} ${value(p.volume)} lot`).join(" · ");
+  foot.textContent = `${STATUS_TEXT[inst.status] || inst.status} · ${inst.timeframe}${inst.session ? ` · ${fr("sessions", inst.session)}` : ""}` +
+    (inst.shadow_open ? ` · ${inst.shadow_open} position(s) simulée(s)` : "") + (real ? ` · ORDRE DÉMO : ${real}` : "");
+  append(button, head, price, (inst.closes || []).length > 1 ? sparkline(inst.closes, (inst.change_pct || 0) >= 0) : node("div", "spark-empty", "en attente des premières bougies"), chips, foot);
+  button.addEventListener("click", () => onPick(inst.symbol));
+  return button;
+}
+function candleChart(history, symbols, onPick) {
   const candles = history.candles || [];
   const panel = card(`${history.symbol || "Instrument"} · bougies ${history.timeframe || ""}`);
-  if (Array.isArray(history.symbols) && history.symbols.length) {
-    const picker = node("select"); picker.setAttribute("aria-label", "Choisir l'instrument du graphique");
-    history.symbols.forEach(s => { const option = node("option", "", s); option.value = s; if (s === history.symbol) option.selected = true; picker.appendChild(option); });
-    picker.addEventListener("change", () => { chartSymbol = picker.value; render("Command Center"); });
-    append(panel, picker);
+  if (symbols.length) {
+    const pick = node("div", "pick");
+    symbols.forEach(s => { const b = node("button", s === history.symbol ? "on" : "", s); b.type = "button"; b.addEventListener("click", () => onPick(s)); pick.appendChild(b); });
+    append(panel, pick);
   }
-  if(!candles.length) { append(panel,empty("Aucune bougie enregistrée pour cet instrument : elles apparaissent quand les agents travaillent.")); return panel; }
-  const series=candles.map(c=>Number(c.close)).filter(Number.isFinite);
-  if(series.length<2) { append(panel,empty("Historique insuffisant")); return panel; }
-  const low=Math.min(...series), high=Math.max(...series), span=high-low||1;
-  const svg=document.createElementNS("http://www.w3.org/2000/svg","svg");
-  svg.setAttribute("viewBox","0 0 700 230");svg.setAttribute("class","chart-svg");svg.setAttribute("role","img");svg.setAttribute("aria-label","Évolution des clôtures enregistrées");
-  const line=document.createElementNS("http://www.w3.org/2000/svg","polyline");
-  line.setAttribute("points",series.map((v,i)=>`${(i/(series.length-1)*690+5).toFixed(1)},${(215-(v-low)/span*200).toFixed(1)}`).join(" "));
-  svg.appendChild(line);append(panel,svg,node("div","sub",`${series.length} clôtures · ${history.source || ""} · dernière : ${when(candles[candles.length-1].closed_at)}`));return panel;
+  if (candles.length < 2) { append(panel, empty("Aucune bougie enregistrée pour cet instrument : elles apparaissent quand les agents travaillent.")); return panel; }
+  const W = 760, H = 300, left = 8, right = 62, top = 10, bottom = 22;
+  const lo = Math.min(...candles.map(c => Number(c.low))), hi = Math.max(...candles.map(c => Number(c.high))), span = hi - lo || 1;
+  const y = v => top + (hi - v) / span * (H - top - bottom);
+  const step = (W - left - right) / candles.length, bodyW = Math.max(1.5, step * 0.62);
+  const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, class: "candles", role: "img", "aria-label": "Bougies enregistrées de l'instrument choisi" });
+  for (let k = 0; k <= 4; k++) {
+    const v = hi - span * k / 4, yy = y(v);
+    svg.appendChild(svgEl("line", { x1: left, x2: W - right, y1: yy, y2: yy, class: "gridline" }));
+    const label = svgEl("text", { x: W - right + 6, y: yy + 3 }); label.textContent = v.toLocaleString("fr-FR", { maximumFractionDigits: 2 }); svg.appendChild(label);
+  }
+  candles.forEach((c, i) => {
+    const x = left + step * i + step / 2, o = Number(c.open), cl = Number(c.close), upc = cl >= o, cls = upc ? "up" : "down";
+    svg.appendChild(svgEl("line", { x1: x, x2: x, y1: y(Number(c.high)), y2: y(Number(c.low)), class: cls }));
+    svg.appendChild(svgEl("rect", { x: x - bodyW / 2, y: Math.min(y(o), y(cl)), width: bodyW, height: Math.max(1, Math.abs(y(o) - y(cl))), class: cls }));
+  });
+  const last = Number(candles[candles.length - 1].close);
+  svg.appendChild(svgEl("line", { x1: left, x2: W - right, y1: y(last), y2: y(last), class: "last" }));
+  const tag = svgEl("text", { x: W - right + 6, y: y(last) - 4 }); tag.textContent = last.toLocaleString("fr-FR", { maximumFractionDigits: 3 }); svg.appendChild(tag);
+  append(panel, svg, node("div", "sub", `${candles.length} bougies · ${history.source || ""} · dernière clôture : ${when(candles[candles.length - 1].closed_at)}`));
+  return panel;
 }
+function eventLook(kind) {
+  if (kind.includes("order_sent")) return ["▲", "ok"];
+  if (kind.includes("order_closed")) return ["✓", "ok"];
+  if (kind.includes("refused") || kind.includes("uncertain") || kind.includes("unprotected") || kind.startsWith("alert")) return ["!", "bad"];
+  if (kind.includes("kill_switch")) return ["⛔", "bad"];
+  if (kind.includes("mode_changed") || kind.includes("settings") || kind.includes("config")) return ["⚙", "info"];
+  return ["•", ""];
+}
+function eventDetail(e) {
+  let p = {}; try { p = JSON.parse(e.payload || "{}"); } catch (err) { p = {}; }
+  if (e.kind === "autopilot.mode_changed") return `${fr("values", p.from)} → ${fr("values", p.to)}`;
+  if (e.kind === "autopilot.order_refused") return `${p.symbol || ""} · ${fr("refusals", p.code)}`;
+  if (e.kind === "autopilot.order_closed") return `${p.symbol || ""} · ${signed(p.profit)} $ · sortie : ${p.reason || "—"}`;
+  if (e.kind === "autopilot.order_sent") return `${p.symbol || ""} · ${action(p.side)} · ${value(p.volume)} lot`;
+  if (e.kind === "autopilot.error" || e.kind === "autopilot.data_error") return (p.message || p.error || "").slice(0, 90);
+  return "";
+}
+function timelineCard(events) {
+  const panel = card("Activité récente");
+  if (!events.length) { append(panel, empty("Aucun événement important pour l'instant.")); return panel; }
+  const list = node("ul", "timeline");
+  events.slice(0, 10).forEach(e => {
+    const [icon, kind] = eventLook(e.kind);
+    const item = node("li"), body = node("div");
+    append(body, node("div", "", fr("events", e.kind)));
+    const detail = eventDetail(e);
+    append(body, node("small", "", `${when(e.at)}${detail ? ` · ${detail}` : ""}`));
+    append(item, node("span", `t-icon ${kind}`, icon), body);
+    list.appendChild(item);
+  });
+  append(panel, list);
+  return panel;
+}
+function barRow(label, text, stat, scale, badgeText) {
+  const r = node("div", "row");
+  append(r, node("strong", "", label));
+  const bar = node("div", "mbar"); bar.appendChild(node("div", "zero"));
+  if (stat && typeof stat.mean_r === "number") {
+    const m = stat.mean_r, w = Math.min(50, Math.abs(m) / scale * 50), fill = node("div", "fill");
+    setStyle(fill, { left: (m >= 0 ? 50 : 50 - w) + "%", width: w + "%", background: m >= 0 ? "var(--gain)" : "var(--loss)" });
+    bar.appendChild(fill);
+    if (Array.isArray(stat.mean_r_interval)) {
+      const a = Math.max(0, Math.min(100, 50 + stat.mean_r_interval[0] / scale * 50)), b = Math.max(0, Math.min(100, 50 + stat.mean_r_interval[1] / scale * 50)), ci = node("div", "ci");
+      setStyle(ci, { left: a + "%", width: Math.max(1, b - a) + "%" }); bar.appendChild(ci);
+    }
+  }
+  append(r, bar, node("span", "rtext", text), node("span", "badge", badgeText));
+  return r;
+}
+const barScale = stats => Math.max(0.5, ...Object.values(stats || {}).flatMap(s => [Math.abs(s.mean_r || 0), ...(s.mean_r_interval || []).map(Math.abs)]));
 const armName = arm => fr("arms", arm);
 const pct = x => (typeof x === "number" ? (Math.round(x * 1000) / 10).toLocaleString("fr-FR") + " %" : "—");
 const num = x => (typeof x === "number" ? x.toLocaleString("fr-FR", { maximumFractionDigits: 2 }) : "—");
@@ -116,6 +230,10 @@ function pilotCard(pilot) {
   const on = pilot.mode === "observe" || auto;
   const silent = on && !pilot.alive;
   const panel = card("Agents automatiques");
+  const strip = node("div", "pilot-strip");
+  append(strip, node("span", `dot ${on ? (silent ? "warn" : "live") : ""}`), node("strong", "", auto ? "DÉMO AUTOMATIQUE" : on ? "EN OBSERVATION" : "ARRÊTÉS"),
+    node("span", "sub", `arrêt des nouvelles entrées : ${pilot.kill_switch ? "ACTIF" : "levé"}`));
+  append(panel, strip);
   append(panel, info(auto
     ? (silent ? "Ordres automatiques activés mais aucun signe de vie récent : le serveur local a peut-être été arrêté. Les positions ouvertes gardent leur stop chez le courtier."
               : "Les agents travaillent ET envoient des ordres sur le compte DÉMO (jamais de l'argent réel) : un seul par instrument, avec stop et objectif chez le courtier, dans les limites de risque des paramètres. « Trading algo » doit rester allumé dans MetaTrader.")
@@ -123,14 +241,6 @@ function pilotCard(pilot) {
     ? (silent ? "Les agents sont activés mais aucun signe de vie récent : le serveur local a peut-être été arrêté. Ils reprennent seuls dès qu'il redémarre."
               : "Les agents travaillent : à chaque nouvelle bougie ils analysent, et chaque avis est journalisé. Aucun ordre n'est envoyé ; des positions simulées mesurent ce que leurs avis auraient donné.")
     : "Les agents sont arrêtés. Activez-les : ils analysent chaque bougie, de jour comme de nuit, jusqu'à ce que vous les désactiviez.", silent));
-  labeled(panel, { état: auto ? "DÉMO AUTOMATIQUE" : on ? "EN OBSERVATION" : "ARRÊTÉ", cycles_terminés: pilot.cycles, décisions_du_jour: pilot.decisions_today,
-    résultats_simulés_mesurés: pilot.shadow_outcomes, erreurs: pilot.errors, dépense_IA_usd: pilot.costs?.total_usd,
-    ordres_clôturés: pilot.orders?.closed, résultat_net_des_ordres_usd: pilot.orders?.net_profit,
-    arrêt_des_nouvelles_entrées: pilot.kill_switch ? "ACTIF" : "levé" });
-  Object.entries(pilot.last_cycle || {}).forEach(([symbol, cycle]) => append(panel, row([symbol,
-    `${when(cycle.bar_close)} · ${fr("sessions", cycle.session)}`,
-    cycle.halt ? "PRUDENCE : ANNONCE AMÉRICAINE" : modelNote(cycle.models)])));
-  if (pilot.last_error) append(panel, info(`Dernière erreur : ${pilot.last_error}`, true));
   const actions = node("div", "pilot-actions");
   const toggle = node("button", on ? "danger" : "", on ? "Désactiver les agents" : "Activer les agents (observation)");
   toggle.type = "button";
@@ -143,6 +253,14 @@ function pilotCard(pilot) {
   second.addEventListener("click", () => openPilotDialog(auto ? "observe" : "demo_auto"));
   append(actions, second);
   append(panel, actions);
+  const more = node("details", "more");
+  append(more, node("summary", "", "Détails du pilote"));
+  labeled(more, { cycles_terminés: pilot.cycles, décisions_du_jour: pilot.decisions_today, résultats_simulés_mesurés: pilot.shadow_outcomes, erreurs: pilot.errors, dépense_IA_usd: pilot.costs?.total_usd });
+  Object.entries(pilot.last_cycle || {}).forEach(([symbol, cycle]) => append(more, row([symbol,
+    `${when(cycle.bar_close)} · ${fr("sessions", cycle.session)}`,
+    cycle.halt ? "PRUDENCE : ANNONCE AMÉRICAINE" : modelNote(cycle.models)])));
+  if (pilot.last_error) append(more, info(`Dernière erreur : ${pilot.last_error}`, true));
+  append(panel, more);
   return panel;
 }
 const DEMO_PHRASE = "ACTIVER LES ORDRES AUTOMATIQUES DEMO";
@@ -174,7 +292,7 @@ function performanceCards(perf) {
   append(arms, info("Chaque avis « achat » ou « vente » ouvre une position simulée sur les vraies bougies suivantes (écart d'achat-vente inclus). R = gain ou perte exprimé en multiple du risque initial. Peu de positions ne prouvent rien : deux semaines servent de diagnostic."));
   if (!names.length) append(arms, empty("Aucune décision enregistrée. Activez les agents depuis la Vue d'ensemble."));
   names.forEach(arm => { const a = perf.arms[arm];
-    append(arms, row([armName(arm), `${a.trades} positions mesurées · R moyen ${num(a.mean_r)} · réussite ${pct(a.win_rate)} · abstention ${pct(a.abstention_rate)}${a.model_failures ? ` · ${a.model_failures} appels IA en échec` : ""}`, perfBadge(a)])); });
+    append(arms, barRow(armName(arm), `${a.trades} positions · R moyen ${num(a.mean_r)} · réussite ${pct(a.win_rate)} · abstention ${pct(a.abstention_rate)}${a.model_failures ? ` · ${a.model_failures} appels IA en échec` : ""}`, a, barScale(perf.arms), perfBadge(a))); });
   out.push(arms);
   const skills = card("Les compétences aident-elles ?");
   const agents = Object.entries(perf.skills_vs_plain || {});
@@ -191,7 +309,7 @@ function performanceCards(perf) {
   append(direction, info("Pour chaque avis d'achat ou de vente d'un cycle d'analyse, on mesure le mouvement du prix après un délai égal à l'intervalle entre deux consultations de l'IA, en distances de stop et après l'écart d'achat-vente. Sans position bloquée, ces observations sont bien plus nombreuses que les positions simulées."));
   const dirNames = Object.keys(dir.arms || {});
   if (!dirNames.length) append(direction, empty("Aucune observation mesurée pour l'instant (premiers résultats après un délai d'analyse)."));
-  dirNames.forEach(arm => { const a = dir.arms[arm]; append(direction, row([armName(arm), `${a.trades} observations · mouvement moyen ${num(a.mean_r)} · direction juste ${pct(a.win_rate)}`, perfBadge(a)])); });
+  dirNames.forEach(arm => { const a = dir.arms[arm]; append(direction, barRow(armName(arm), `${a.trades} observations · mouvement moyen ${num(a.mean_r)} · direction juste ${pct(a.win_rate)}`, a, barScale(dir.arms), perfBadge(a))); });
   out.push(direction);
   const forced = card("La direction forcée bat-elle la pièce de monnaie ?");
   append(forced, info("Variante de recherche : l'analyste doit choisir achat ou vente à chaque cycle. On la compare à un tirage à pile ou face, la référence du hasard. Un résultat n'est crédible qu'avec au moins 30 positions et un écart dont l'intervalle reste au-dessus de zéro."));
@@ -239,27 +357,46 @@ function decisionCard(list) {
   return panel;
 }
 async function dashboard(sequence) {
-  const [data,history,pilot]=await Promise.all([get("/dashboard"),get("/market/candles"+(chartSymbol?`?symbol=${encodeURIComponent(chartSymbol)}`:"")),get("/autopilot").catch(()=>null)]);
+  const query = chartSymbol ? `?symbol=${encodeURIComponent(chartSymbol)}` : "";
+  const [data, overview, history, pilot] = await Promise.all([get("/dashboard"), get("/market/overview").catch(() => ({ instruments: [] })),
+    get("/market/candles" + query), get("/autopilot").catch(() => null)]);
   if (sequence !== renderSequence) return;
-  if(pilot){updateModeBadge(pilot);append(content,pilotCard(pilot));}
-  const snap=data.snapshot;
-  if(snap) append(content,info(`Dernière analyse : ${snap.symbol} · ${when(snap.observed_at)} · ${freshness(snap)}`,!pilot||!pilot.alive));
-  const account=data.account;
-  append(content,grid("metrics",
-    stat("Capital du compte démo",account?`${num(account.balance)} ${account.currency||""}`:"—",account?`lu le ${when(account.at)}`:"Visible quand le serveur est connecté à MetaTrader"),
-    stat("Valeur du compte (équité)",account?`${num(account.equity)} ${account.currency||""}`:"—",account?"capital plus positions ouvertes":"—"),
-    stat("Résultat des ordres démo",pilot&&pilot.orders?`${num(pilot.orders.net_profit)} $`:"—",pilot&&pilot.orders&&pilot.orders.closed?`${pilot.orders.closed} ordres clôturés (compte démo)`:"Aucun ordre clôturé"),
-    stat("Décisions enregistrées",value(data.decisions_total),"Avis de toutes les méthodes")));
-  const agents=card("Dernier avis de chaque rôle");
-  [["graph","01"],["news","02"],["quant","03"],["risk","04"],["director","05"],["ai_director","06"]].forEach(([id,n])=>{
-    const vote=(data.latest_votes||{})[id];
-    const title=id==="ai_director"?armName("ai:director"):id==="director"?"Directeur par vote":role(id);
-    const help=id==="ai_director"?"Lit tous les rapports de la consultation":id==="director"?"Vote : deux analystes d'accord":fr("roleHelp",id);
-    append(agents,row([`${n}  ${title}`,help,id==="risk"?"VETO PAR LE CODE":vote?`${action(vote.action)} · ${vote.symbol}`:"AUCUN CYCLE"]));});
-  append(content,grid("two",chart(history),agents));
-  const logs=card("Journal récent (événements importants)");(data.events||[]).slice(0,8).forEach(e=>append(logs,row([fr("events",e.kind),when(e.at)])));if(!data.events?.length)append(logs,empty("Aucun événement"));
-  const risk=card("Contrôle opérationnel");labeled(risk,{arrêt_des_nouvelles_entrées:data.kill_switch?"Actif":"Levé (ordres automatiques possibles)",courtier:fr("values",data.broker),mode:fr("values",data.mode),compte_réel:"Interdit"});
-  append(content,grid("two",logs,risk));
+  if (pilot) updateModeBadge(pilot);
+  const account = data.account, net = pilot && pilot.orders ? pilot.orders.net_profit : null;
+  const delta = account ? account.equity - account.balance : null;
+  const working = pilot && pilot.alive && pilot.mode !== "off";
+  const tiles = node("div", "tiles");
+  append(tiles,
+    tile("Capital du compte démo", account ? `${num(account.balance)} ${account.currency || ""}` : "—", account ? `lu à ${when(account.at)}` : "visible quand le serveur lit MetaTrader"),
+    tile("Valeur du compte (équité)", account ? `${num(account.equity)} ${account.currency || ""}` : "—", delta === null ? "—" : `${signed(delta)} ${account.currency || ""} de positions ouvertes`, delta > 0 ? "gain" : delta < 0 ? "loss" : "", tone(delta)),
+    tile("Résultat des ordres démo", net === null ? "—" : `${signed(net)} $`, pilot && pilot.orders && pilot.orders.closed ? `${pilot.orders.closed} ordres clôturés` : "aucun ordre clôturé", net > 0 ? "gain" : net < 0 ? "loss" : "", tone(net)),
+    tile("Coût IA du jour", `${num(data.costs?.today_usd)} $`, `total depuis le début : ${num(data.costs?.total_usd)} $`),
+    tile("Agents", working ? (pilot.mode === "demo_auto" ? "ORDRES" : "AU TRAVAIL") : "ARRÊTÉS", working ? `${pilot.cycles} cycles · ${pilot.decisions_today} décisions aujourd'hui` : "activez-les ci-dessous", working ? "gain" : "idle"));
+  append(content, tiles);
+  if (pilot) append(content, pilotCard(pilot));
+  const instruments = overview.instruments || [];
+  const pick = symbol => { chartSymbol = symbol; render("Command Center"); };
+  const heading = node("div", "section-title"); append(heading, node("h2", "", "Instruments suivis"), node("span", "", "un clic affiche ses bougies"));
+  append(content, heading);
+  const grid2 = node("div", "inst-grid");
+  instruments.forEach(inst => grid2.appendChild(instrumentCard(inst, inst.symbol === history.symbol, pick)));
+  if (!instruments.length) append(grid2, empty("Aucun instrument configuré (voir Paramètres)."));
+  append(content, grid2);
+  const agents = card("Dernier avis de chaque rôle");
+  [["graph", "01"], ["news", "02"], ["quant", "03"], ["risk", "04"], ["director", "05"], ["ai_director", "06"]].forEach(([id, n]) => {
+    const vote = (data.latest_votes || {})[id];
+    const title = id === "ai_director" ? armName("ai:director") : id === "director" ? "Directeur par vote" : role(id);
+    const help = id === "ai_director" ? "Lit tous les rapports de la consultation" : id === "director" ? "Vote : deux analystes d'accord" : fr("roleHelp", id);
+    const item = node("div", "vote"), left = node("div");
+    append(left, node("div", "", `${n} · ${title}`), node("small", "", help));
+    const kind = vote ? (vote.action === "BUY" ? "buy" : vote.action === "SELL" ? "sell" : "wait") : "";
+    append(item, left, node("span", `chip ${kind}`, id === "risk" ? "VETO PAR LE CODE" : vote ? `${action(vote.action)} · ${vote.symbol}` : "AUCUN CYCLE"));
+    append(agents, item);
+  });
+  append(content, grid("two", candleChart(history, history.symbols || [], pick), agents));
+  const risk = card("Contrôle opérationnel");
+  labeled(risk, { arrêt_des_nouvelles_entrées: data.kill_switch ? "Actif" : "Levé (ordres automatiques possibles)", courtier: fr("values", data.broker), mode: fr("values", data.mode), compte_réel: "Interdit" });
+  append(content, grid("two", timelineCard(data.events || []), risk));
 }
 function renderList(title, list, fields, missing) {
   const panel=card(title);

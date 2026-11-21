@@ -46,7 +46,8 @@ async function run() {
   await tick();
   complete("/labels.json", { actions: { WAIT: "ATTENTE (aucune entrée)" }, roles: { quant: "Analyste quantitatif" } });
   await tick();
-  complete("/dashboard", { events: [], latest_votes: {} });
+  complete("/dashboard", { events: [], latest_votes: {}, costs: {} });
+  complete("/market/overview", { instruments: [] });
   complete("/market/candles", { candles: [], symbols: [] });
   complete("/autopilot", { mode: "off", alive: false, last_cycle: {}, cycles: 0, decisions_today: 0, shadow_outcomes: 0, errors: 0, costs: { total_usd: 0 } });
   await tick();
@@ -67,7 +68,8 @@ async function run() {
   assert.doesNotMatch(text(content), /ANCIENNE RÉPONSE/);
   const home = vm.runInContext('render("Command Center")', context);
   await tick();
-  complete("/dashboard", { events: [], latest_votes: {} });
+  complete("/dashboard", { events: [], latest_votes: {}, costs: {} });
+  complete("/market/overview", { instruments: [] });
   complete("/market/candles", { candles: [], symbols: [] });
   complete("/autopilot", { mode: "off", alive: false, last_cycle: {}, cycles: 0, decisions_today: 0, shadow_outcomes: 0, errors: 0, costs: { total_usd: 0 } });
   await home;

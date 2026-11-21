@@ -16,7 +16,7 @@ TRADING INTELLIGENCE PRO est un **prototype de recherche** sur l'or (XAUUSD) et 
 | Code Python | 33 modules, environ 3 600 lignes, plus 2 000 lignes de tests |
 | Tests automatiques | 138 réussis, plus un test Node de navigation |
 | Intégration continue GitHub | verte sur les commits vérifiés |
-| Interfaces | 2 (aperçu local sans dépendance, version Next.js), 12 rubriques chacune |
+| Interface | 1 (servie par le serveur local, sans dépendance), 12 rubriques |
 | Documentation | 12 documents, 37 décisions datées dans `AVANCEMENT.md` |
 
 ## Ce que l'application fait aujourd'hui

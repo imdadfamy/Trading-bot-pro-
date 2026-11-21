@@ -1,8 +1,8 @@
 # Préparation des trois environnements
 
-## Vercel — frontend
+## Interface
 
-Répertoire `web`, commande `npm run build`. `NEXT_PUBLIC_API_URL` doit pointer vers l'API HTTPS autorisée. Avant publication : lockfile, build CI, CORS limité, authentification et absence de secret dans les variables `NEXT_PUBLIC_*`.
+L'interface (`web/preview`) est servie par le serveur Python lui-même ; il n'y a pas de frontend séparé à déployer (l'ancienne application Next.js a été retirée le 21 novembre 2026). Avant toute exposition hors de l'ordinateur local : HTTPS, authentification, CORS limité.
 
 ## Railway — API et workers
 

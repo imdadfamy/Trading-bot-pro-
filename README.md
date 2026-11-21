@@ -13,9 +13,7 @@ Set-Location -LiteralPath 'C:\Users\imdad\TRADING bot pro'
 powershell -NoProfile -ExecutionPolicy Bypass -File .\Start-Local.ps1
 ```
 
-Le script lance les tests, charge les données synthétiques, crée une clé opérateur temporaire et démarre l'interface à `http://127.0.0.1:8000`. La clé est affichée dans le terminal pour les réglages et l'arrêt d'urgence ; elle n'est pas enregistrée. Garder le terminal ouvert et appuyer sur Ctrl+C pour arrêter. Pour vérifier sans démarrer : `powershell -NoProfile -ExecutionPolicy Bypass -File .\Verify-Local.ps1`. Utiliser `-WithoutExamples` pour ne pas charger de nouvelles données synthétiques. L'option de politique d'exécution ne s'applique qu'au processus lancé, sans modifier les paramètres permanents de Windows.
-
-Prérequis supplémentaires pour la version Next.js : Node.js et npm.
+Le script crée une clé opérateur temporaire et démarre le serveur local, qui héberge à la fois l'interface et le pilote automatique, à `http://127.0.0.1:8000`. La clé est affichée dans le terminal pour les réglages, les boutons et l'arrêt d'urgence ; elle n'est pas enregistrée. Garder le terminal ouvert (et MetaTrader 5 ouvert) ; Ctrl+C arrête le serveur. Options : `-Verify` lance d'abord toutes les vérifications, `-WithExamples` charge des données d'exemple fictives. Pour vérifier sans démarrer : `Verify-Local.ps1`. L'option de politique d'exécution ne s'applique qu'au processus lancé, sans modifier les paramètres permanents de Windows. Mode d'emploi du pilote : [docs/PILOTE_AUTOMATIQUE.md](docs/PILOTE_AUTOMATIQUE.md).
 
 Le noyau local et l'API d'observation se lancent sans installation réseau :
 
@@ -43,38 +41,30 @@ $env:TIP_OPERATOR_KEY = 'une-cle-locale-longue-a-generer'
 python -m trading_pro.server
 ```
 
-Ouvrir **http://127.0.0.1:8000** pour l'interface locale sans npm. Elle affiche les douze rubriques, les bougies historiques importées, le journal, le catalogue, les coûts, les réglages et l'arrêt d'urgence. Le serveur écoute seulement sur l'ordinateur local. Cette interface de secours n'est pas la version Next.js destinée à Vercel.
+Ouvrir **http://127.0.0.1:8000** : c'est l'interface (sans npm ni dépendance). Elle affiche les douze rubriques, le pilote automatique, les instruments, les décisions, les ordres démo, les coûts, les réglages et l'arrêt d'urgence. Le serveur écoute seulement sur l'ordinateur local.
 Les étapes de vérification visuelle et fonctionnelle figurent dans [docs/REVUE_LOCALE.md](docs/REVUE_LOCALE.md).
 
-Le journal des signaux peut être exporté sur la route authentifiée `GET /export/signals.csv`. Il n'existe aucune route permettant de démarrer la démo automatique ou d'envoyer un ordre.
+Le journal des signaux peut être exporté sur la route authentifiée `GET /export/signals.csv`. Les ordres automatiques ne partent que sur le **compte démo** et seulement après activation volontaire (bouton, clé opérateur et phrase de confirmation) ; l'interface n'envoie jamais d'ordre elle-même.
 
 Avec les dépendances disponibles, l'API FastAPI est une option : `python -m pip install -e ./backend` depuis la racine, puis `python -m uvicorn trading_pro.api:app --reload` depuis `backend`.
 
-Dans un autre terminal :
-
-```powershell
-cd web
-npm install
-npm run dev
-```
-
-Ouvrir http://localhost:3000 pour l'interface Next.js une fois ses dépendances installées. La documentation interactive `/docs` n'existe que pour l'adaptateur FastAPI ; les routes communes sont décrites dans [docs/API.md](docs/API.md). Seules les origines CORS locales sont permises. Pour un navigateur distant, définir `NEXT_PUBLIC_API_URL` et configurer explicitement les origines autorisées sur l'API avant exposition.
+La documentation interactive `/docs` n'existe que pour l'adaptateur FastAPI ; les routes communes sont décrites dans [docs/API.md](docs/API.md). Seules les origines locales sont permises.
 
 ## Vérification
 
 ```powershell
 cd backend
 python -m unittest discover -s tests -v
-cd ..\web
-npm run build
+cd ..
+node scripts/test_preview_navigation.cjs
 ```
 
 ## Sécurité et état réel
 
 La démonstration hors ligne `DemoBroker` simule des réponses ; elle n'est pas un compte démo MT5. `MT5DemoBroker` vérifie le mode DEMO avant preflight et immédiatement avant envoi, mais n'est pas activé par l'API. Un signal WAIT, non validé ou expiré ne déclenche aucun envoi. Les intentions d'ordre sont réservées en SQLite ; tout timeout passe à l'état `uncertain` et exige une réconciliation manuelle ou automatique avant une nouvelle tentative. Ne fournir aucun secret au navigateur ni aux agents.
 
-Les pages de l'interface lisent les résultats locaux mais ne constituent pas encore des modules de production. Aucun fournisseur d'actualités, de données live ou de modèles IA n'est connecté ; aucune période expérimentale de 14 jours n'a démarré. Les seuils initiaux nécessitent validation sur le contrat du courtier. Les jeux d'exemple sont **synthétiques** et leurs profits simulés ne prédisent aucun résultat. Les indices synthétiques (Volatility, Boom/Crash, Step, Jump, Range Break) sont une famille distincte de XAUUSD, étudiée hors ligne seulement : voir [indices synthétiques](docs/INDICES_SYNTHETIQUES.md). Voir [avancement](docs/AVANCEMENT.md), [architecture](docs/ARCHITECTURE.md), [intégrations](docs/INTEGRATIONS.md) et [runbook](docs/RUNBOOK.md).
+Les pages de l'interface lisent les résultats locaux. Le pilote lit en direct les bougies du compte démo MetaTrader et interroge un fournisseur de modèles IA quand il est activé ; aucun fournisseur d'actualités n'est automatisé ; la période expérimentale de 14 jours n'a pas démarré. Les seuils initiaux nécessitent validation sur le contrat du courtier. Les jeux d'exemple sont **synthétiques** et leurs profits simulés ne prédisent aucun résultat. Les indices synthétiques (Volatility, Boom/Crash, Step, Jump, Range Break) sont une famille distincte de XAUUSD, étudiée hors ligne seulement : voir [indices synthétiques](docs/INDICES_SYNTHETIQUES.md). Voir [avancement](docs/AVANCEMENT.md), [architecture](docs/ARCHITECTURE.md), [intégrations](docs/INTEGRATIONS.md) et [runbook](docs/RUNBOOK.md).
 
 ## Déploiement prévu
 
-Vercel : frontend Next.js ; Railway : API, workers, PostgreSQL et Redis après migrations ; Contabo Windows : terminal MT5 et connecteur sortant. Les fichiers de production, l'authentification forte et la réconciliation sont à réaliser et valider avant tout déploiement ou test automatique. Aucun service payant n'a été commandé.
+Cible du cahier des charges : Railway (API, workers, PostgreSQL, Redis) et un VPS Windows (terminal MT5 et connecteur sortant). Aujourd'hui tout tourne sur l'ordinateur de l'utilisateur. Les fichiers de production, l'authentification forte et la réconciliation sont à réaliser et valider avant tout déploiement. Aucun service payant n'a été commandé.

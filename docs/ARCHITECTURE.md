@@ -18,7 +18,7 @@ Les indices synthétiques ne partagent pas les preuves de XAUUSD : ni annonces, 
 
 ## Cible de production non implémentée
 
-Vercel pour Next.js, Railway pour API NestJS, workers Python, PostgreSQL et Redis ; Contabo Windows pour le terminal MT5 et une passerelle sortante authentifiée. Le stockage SQLite est local seulement. Aucune mise en service avant migration, contrôle des rôles/MFA, coffre de secrets, tests de restauration, CI validée et recette du compte démo.
+Cible du cahier des charges (non réalisée : l'interface est servie par le serveur Python local) : Railway pour l'API, workers Python, PostgreSQL et Redis ; Contabo Windows pour le terminal MT5 et une passerelle sortante authentifiée. Le stockage SQLite est local seulement. Aucune mise en service avant migration, contrôle des rôles/MFA, coffre de secrets, tests de restauration, CI validée et recette du compte démo.
 
 ## Données et calculs
 
