@@ -13,7 +13,7 @@
       <div class="brand"><span class="brand-icon">◈</span><span>TRADING<br>INTELLIGENCE <em>PRO</em></span></div>
       <p class="side-label">PLATEFORME DE RECHERCHE</p>
       <nav id="navigation" aria-label="Navigation principale"></nav>
-      <div class="side-bottom"><span class="danger-dot">●</span> ARRÊT DES ENTRÉES ACTIF<br><small>Compte réel interdit</small></div>
+      <div class="side-bottom"><span class="danger-dot">●</span> <span id="side-status">ARRÊT DES ENTRÉES ACTIF</span><br><small>Compte réel interdit</small></div>
     </aside>
     <main>
       <header class="topbar">
@@ -30,7 +30,7 @@
   </div>
   <dialog id="stop-dialog" aria-labelledby="stop-title">
     <h2 id="stop-title">Arrêt des nouvelles entrées</h2>
-    <p>La demande est enregistrée dans l’API locale. La liaison au worker MT5 n’est pas encore en service.</p>
+    <p>Bloque aussitôt toute nouvelle entrée du pilote automatique ; les positions déjà ouvertes gardent leur stop et leur objectif chez le courtier. Pour reprendre, il faudra réactiver volontairement les ordres automatiques.</p>
     <label>Clé opérateur<input id="stop-key" type="password" autocomplete="off"></label>
     <p id="stop-message" role="status"></p>
     <div class="dialog-actions"><button id="stop-close">Fermer</button><button id="stop-confirm" class="danger">Activer l’arrêt</button></div>
@@ -38,6 +38,7 @@
   <dialog id="pilot-dialog" aria-labelledby="pilot-title">
     <h2 id="pilot-title">Agents automatiques</h2>
     <p id="pilot-text"></p>
+    <label id="pilot-phrase-label" hidden>Tape exactement : <strong id="pilot-phrase-hint"></strong><input id="pilot-phrase" autocomplete="off"></label>
     <label>Clé opérateur<input id="pilot-key" type="password" autocomplete="off"></label>
     <p id="pilot-message" role="status"></p>
     <div class="dialog-actions"><button id="pilot-close">Fermer</button><button id="pilot-confirm">Confirmer</button></div>

@@ -4,6 +4,7 @@ import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
 from email.message import Message
+from types import SimpleNamespace as NS
 from pathlib import Path
 
 from trading_pro import autopilot, autopilot_stats
@@ -500,6 +501,7 @@ class HttpAndProviderTests(unittest.TestCase):
 
             class Runner:
                 started = 0
+                autopilot = NS(executor=None)
                 def start(self):
                     Runner.started += 1
             cls = handler_factory(service, "secret-key", Runner())

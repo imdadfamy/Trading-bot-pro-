@@ -69,6 +69,16 @@ def mt5_fetcher(*, module=None, environ=None, clock=time.time):
     return fetch
 
 
+def mt5_executor(*, module=None, environ=None):
+    """The only automatic path to order_send. Built once per server process, used by the pilot thread alone."""
+    from .autopilot_exec import Executor
+    if module is None:
+        import MetaTrader5 as module  # type: ignore
+    login, server, password = credentials_from_env(environ)
+    path = str(DEFAULT_TERMINAL) if DEFAULT_TERMINAL.is_file() else None
+    return Executor(module, login, server, password, path)
+
+
 def model_setup_provider(service, environ=None):
     """Callable evaluated each cycle: a ModelSetup, or a short reason string when models cannot run."""
     from .openai_provider import provider_from_env

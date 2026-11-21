@@ -9,7 +9,7 @@ from .store import ResearchStore
 
 
 DEFAULT_RISK = {"risk_per_trade": 0.005, "max_daily_loss": 0.02, "max_open_risk": 0.01, "max_positions": 2,
-                "max_spread": 0.5, "fixed_lot": None, "commission_per_lot": 0.0, "slippage_ticks": 2.0}
+                "max_spread": 0.0, "fixed_lot": None, "commission_per_lot": 0.0, "slippage_ticks": 2.0}
 RISK_RANGES = {"risk_per_trade": (0.0005, 0.02), "max_daily_loss": (0.002, 0.10), "max_open_risk": (0.0005, 0.05),
                "max_positions": (1, 10), "max_spread": (0, 100000), "commission_per_lot": (0, 1000),
                "slippage_ticks": (0, 1000)}
@@ -72,9 +72,12 @@ class Service:
         from .core import Limits
         config = self.settings()["settings"]
         risk = config["risk"]
+        # The risk engine needs a finite AI ceiling: with the cap removed, a limit no spend can reach.
+        ai_ceiling = config["experiment_ai_limit_usd"] if config.get("ai_cap_enabled", True) else 1e12
         return Limits(risk_per_trade=risk["risk_per_trade"], max_daily_loss=risk["max_daily_loss"],
                       max_open_risk=risk["max_open_risk"], max_positions=int(risk["max_positions"]),
-                      max_spread=risk["max_spread"], max_quote_age_seconds=config["quote_max_age_seconds"])
+                      max_spread=risk["max_spread"], max_quote_age_seconds=config["quote_max_age_seconds"],
+                      max_ai_spend=ai_ceiling)
 
     def update_settings(self, data: dict, expected_version: int, author: str):
         required = {"mode", "model_by_agent", "daily_ai_limit_usd", "experiment_ai_limit_usd", "quote_max_age_seconds"}
@@ -175,6 +178,8 @@ class Service:
         if path == "/autopilot":
             from . import autopilot
             return autopilot.status(self.store)
+        if path == "/autopilot/orders":
+            return {"summary": self.store.order_summary(), "orders": self.store.orders()}
         if path == "/autopilot/performance":
             from . import autopilot_stats
             return autopilot_stats.performance(self.store)

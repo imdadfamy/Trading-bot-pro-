@@ -48,7 +48,8 @@
     "demo": "Démo",
     "none": "Aucun",
     "observe": "Observation automatique (aucun ordre)",
-    "off": "Arrêté"
+    "off": "Arrêté",
+    "demo_auto": "Démo automatique (ordres sur le compte démo)"
   },
   "events": {
     "announcement.blackout": "Fenêtre de prudence : annonce américaine",
@@ -81,7 +82,13 @@
     "autopilot.expired": "Décision simulée abandonnée (bougie d'entrée absente)",
     "autopilot.data_error": "Pilote automatique : données indisponibles",
     "autopilot.error": "Pilote automatique : erreur interne",
-    "autopilot.scored": "Qualité d'une direction mesurée à horizon fixe"
+    "autopilot.scored": "Qualité d'une direction mesurée à horizon fixe",
+    "autopilot.order_sent": "Ordre automatique envoyé au compte démo",
+    "autopilot.order_refused": "Ordre automatique refusé par un garde-fou (rien envoyé)",
+    "autopilot.order_closed": "Position automatique clôturée (résultat enregistré)",
+    "autopilot.order_uncertain": "Résultat d'ordre incertain : arrêt des entrées activé",
+    "autopilot.position_unprotected": "Position sans protection : fermée, arrêt des entrées activé",
+    "alert.raised": "Alerte opérationnelle levée"
   },
   "gates": {
     "broker_demo_verified": [
@@ -227,5 +234,29 @@
     "New York": "New York",
     "London/New York overlap": "Londres / New York (chevauchement)",
     "Outside indicative sessions": "Hors sessions indicatives"
+  },
+  "refusals": {
+    "stopped": "arrêt des nouvelles entrées actif",
+    "announcement": "fenêtre d'annonce américaine",
+    "terminal": "MetaTrader indisponible",
+    "trading_algo_off": "« Trading algo » éteint dans MetaTrader",
+    "account": "compte non autorisé à trader",
+    "symbol": "symbole introuvable",
+    "position_open": "position déjà ouverte sur l'instrument",
+    "no_tick": "aucune cotation (marché fermé ?)",
+    "stale_quote": "cotation périmée",
+    "risk": "moteur de risque",
+    "fixed_lot": "lot fixe incompatible avec le risque",
+    "broker": "refusé par le courtier avant envoi",
+    "account_unreadable": "état du compte illisible",
+    "duplicate": "décision déjà traitée : jamais renvoyée"
+  },
+  "orderStates": {
+    "open": "position ouverte",
+    "closed": "clôturée",
+    "refused": "refusée, rien envoyé",
+    "uncertain": "résultat incertain",
+    "rejected": "rejetée par le courtier",
+    "vanished": "introuvable"
   }
 }

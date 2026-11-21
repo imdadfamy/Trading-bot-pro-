@@ -87,9 +87,14 @@ def handler_factory(service: Service, operator_key: str | None = None, runner=No
                     size = int(self.headers.get("Content-Length", "0"))
                     if size <= 0 or size > 1024:
                         return self._json(413, {"error": "Invalid request size"})
-                    mode = json.loads(self.rfile.read(size)).get("mode")
-                    result = autopilot.set_mode(service.store, mode, author=self.headers.get("X-Operator-Name", "local-operator"))
-                    if mode == "observe" and runner is not None:
+                    body = json.loads(self.rfile.read(size))
+                    mode = body.get("mode")
+                    if mode == "demo_auto" and body.get("confirm") != autopilot.DEMO_AUTO_PHRASE:
+                        return self._json(409, {"error": f"Confirmation phrase missing or wrong. Type exactly: {autopilot.DEMO_AUTO_PHRASE}"})
+                    available = runner is not None and runner.autopilot.executor is not None
+                    result = autopilot.set_mode(service.store, mode, author=self.headers.get("X-Operator-Name", "local-operator"),
+                                                execution_available=available)
+                    if mode in ("observe", "demo_auto") and runner is not None:
                         runner.start()
                     return self._json(200, {**result, "status": autopilot.status(service.store)})
                 except PermissionError as exc:
@@ -176,8 +181,14 @@ def main():
             fetch = None
             print(f"Pilote automatique indisponible : {exc}")
         if fetch is not None:
+            try:
+                executor = autopilot_runtime.mt5_executor()
+            except (ImportError, RuntimeError):
+                executor = None
             pilot = autopilot.Autopilot(service.store, fetch=fetch,
-                                        model_setup=autopilot_runtime.model_setup_provider(service))
+                                        model_setup=autopilot_runtime.model_setup_provider(service),
+                                        executor=executor, limits_provider=service.limits,
+                                        risk_provider=lambda: service.settings()["settings"]["risk"])
             runner = autopilot.AutopilotRunner(pilot)
             runner.start()  # follows the persisted mode: stays idle while it is "off", resumes after a restart
     server = ThreadingHTTPServer(("127.0.0.1", args.port), handler_factory(service, os.getenv("TIP_OPERATOR_KEY"), runner))

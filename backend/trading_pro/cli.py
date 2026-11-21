@@ -256,7 +256,7 @@ def main():
                 saved = Service(args.database).settings()["settings"]["risk"]
                 if args.risk_fraction is None:
                     args.risk_fraction = saved["risk_per_trade"]
-                if args.max_spread is None and saved["max_spread"] != 0.5:
+                if args.max_spread is None and saved["max_spread"] not in (0, 0.5):
                     args.max_spread = saved["max_spread"]
             if args.command == "mt5-send-demo":
                 report = mt5_send.send_supervised(

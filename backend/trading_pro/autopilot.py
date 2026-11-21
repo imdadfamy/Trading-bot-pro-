@@ -20,13 +20,16 @@ from uuid import uuid4
 from .autopilot_features import atr, features, has_family_word, is_synthetic, skill_pack
 from .agents import graph_agent
 from .backtest import BacktestConfig, sma_signal
-from .core import Action, Report, Snapshot, utcnow
+from .core import Action, Limits, Report, Snapshot, utcnow
 from .market import Candle, session_label
 from .models import Budget, run_model
 from .prompts import build_inputs, prompt_tag
 from .store import ResearchStore
 
-MODES = ("off", "observe")
+MODES = ("off", "observe", "demo_auto")
+DEMO_AUTO_PHRASE = "ACTIVER LES ORDRES AUTOMATIQUES DEMO"
+ARM_NAMES = {"rule:sma_cross", "det:graph", "random:coin", *(f"{v}:{a}" for v in ("plain", "skills", "forced")
+                                                           for a in ("graph", "quant", "news", "director"))}
 TIMEFRAME_SECONDS = {"M1": 60, "M5": 300, "M15": 900, "M30": 1800, "H1": 3600}
 DEFAULT_CONFIG = {
     "symbols": ["Volatility 10 Index", "Boom 500 Index", "Crash 500 Index", "Drift Switch Index 10",
@@ -35,6 +38,8 @@ DEFAULT_CONFIG = {
     "symbol_timeframes": {"Drift Switch Index 10": "M1", "Drift Switch Index 20": "M1", "Drift Switch Index 30": "M1"},
     "model_every_minutes": 30, "horizon_bars": 48, "stop_atr_multiple": 2.0, "reward_multiple": 2.0,
     "skill_pack_size": 3, "max_call_usd": 0.25,
+    # Arms whose BUY/SELL becomes a real DEMO order when the mode is "demo_auto" (decisions of the first arm win).
+    "execution_arms": ["skills:director"],
 }
 CONFIG_LIMITS = {"model_every_minutes": (5, 1440), "horizon_bars": (4, 500), "stop_atr_multiple": (0.5, 10),
                  "reward_multiple": (0.5, 10), "skill_pack_size": (0, 8), "max_call_usd": (0.01, 5), "bars": (100, 1000)}
@@ -49,16 +54,23 @@ def get_mode(store: ResearchStore) -> str:
     return mode if mode in MODES else "off"
 
 
-def set_mode(store: ResearchStore, mode: str, *, author: str) -> dict:
-    if mode == "demo_auto":
-        raise PermissionError("Automatic demo orders are not commissioned yet (step 3): only observation is available")
+def set_mode(store: ResearchStore, mode: str, *, author: str, execution_available: bool = False) -> dict:
     if mode not in MODES:
-        raise ValueError("Mode must be off or observe")
+        raise ValueError("Mode must be off, observe or demo_auto")
     if not isinstance(author, str) or not 1 <= len(author) <= 100:
         raise ValueError("Operator identity required")
+    if mode == "demo_auto":
+        if not execution_available:
+            raise PermissionError("The MT5 execution bridge is unavailable in this process: demo orders cannot be sent")
+        if not get_config(store).get("execution_arms"):
+            raise PermissionError("Choose at least one execution arm in the settings first")
     previous = get_mode(store)
     store.state_set("autopilot_mode", mode)
     store.journal.log("autopilot.mode_changed", "global", {"from": previous, "to": mode, "author": author})
+    if mode == "demo_auto":  # activating the automatic orders is the deliberate act that lifts the stop on entries
+        store.release_killed(author=author, reason="demo_auto activated")
+    elif previous == "demo_auto":  # leaving it stops new entries at once; open positions keep their broker-side stops
+        store.set_killed()
     return {"mode": mode, "previous": previous}
 
 
@@ -83,6 +95,9 @@ def set_config(store: ResearchStore, patch: dict, *, author: str) -> dict:
             if (not isinstance(item, list) or not 1 <= len(item) <= 6
                     or any(not isinstance(s, str) or not 1 <= len(s) <= 60 for s in item)):
                 raise ValueError("symbols must be 1 to 6 instrument names")
+        elif key == "execution_arms":
+            if not isinstance(item, list) or len(item) > 6 or any(a not in ARM_NAMES for a in item):
+                raise ValueError("execution_arms must be a list of known arms, for example skills:director")
         elif key == "timeframe":
             if item not in TIMEFRAME_SECONDS:
                 raise ValueError("timeframe must be one of " + ", ".join(TIMEFRAME_SECONDS))
@@ -194,9 +209,15 @@ class ModelSetup:
 
 class Autopilot:
     def __init__(self, store: ResearchStore, *, fetch, model_setup=None,
-                 clock=utcnow, calendar_loader=None, skills_root=None):
+                 clock=utcnow, calendar_loader=None, skills_root=None, executor=None, limits_provider=None,
+                 risk_provider=None):
         self.store = store
         self.fetch = fetch
+        self.executor = executor
+        self.limits_provider = limits_provider or Limits
+        self.risk_provider = risk_provider or (lambda: {"fixed_lot": None, "commission_per_lot": 0.0, "slippage_ticks": 0.0})
+        self.offset_hours = 0.0
+        store.state_set("autopilot_exec_ready", "true" if executor is not None else "false")
         self.model_setup = model_setup
         self.clock = clock
         self.skills_root = skills_root
@@ -320,6 +341,8 @@ class Autopilot:
         if len(candles) < 40:
             return {"symbol": symbol, "status": "data_error", "message": "fewer than 40 closed candles"}
         last = candles[-1]
+        if isinstance(meta, dict) and "server_offset_hours" in meta:
+            self.offset_hours = float(meta["server_offset_hours"])
         if (now - last.closed_at).total_seconds() > 3 * step:
             return {"symbol": symbol, "status": "stale", "last_close": last.closed_at.isoformat()}
         last_bar = self.store.state_get(f"autopilot_last_bar:{symbol}")
@@ -386,11 +409,55 @@ class Autopilot:
             coin = "BUY" if int(sha256(cycle_id.encode()).hexdigest(), 16) % 2 else "SELL"
             propose("random:coin", coin, {"rationale": "seeded coin flip: the chance reference for the forced-direction arms"})
             self._model_arms(symbol, cycle_id, last, candles, config, propose, summary, scored)
+            if get_mode(self.store) == "demo_auto" and self.executor is not None and plan is not None:
+                self._execute_arms(symbol, cycle_id, plan, step, config, summary, now)
         self.store.state_set(f"autopilot_last_bar:{symbol}", last.closed_at.isoformat())
         self.store.journal.log("autopilot.cycle", cycle_id, summary)
         beat = self.heartbeat()
         self._beat(cycles=beat.get("cycles", 0) + 1, last_cycle={**beat.get("last_cycle", {}), symbol: summary})
         return {"symbol": symbol, "status": "halted" if halt else "ok", **summary}
+
+    # -- automatic demo orders
+    def _execute_arms(self, symbol, cycle_id, plan, step, config, summary, now) -> None:
+        """Send the decision of the first execution arm that opened a BUY/SELL this cycle. One order per symbol."""
+        if any(o["symbol"] == symbol for o in self.store.open_orders()):
+            return  # a real position of the project is open on this instrument: it lives on its broker-side stop
+        with self.store.journal.connect() as db:
+            rows = {r["arm"]: dict(r) for r in db.execute(
+                "SELECT decision_id, arm, action, detail FROM decisions WHERE cycle_id=? "
+                "AND status IN ('open','skipped_open')", (cycle_id,))}
+        for arm in config.get("execution_arms", []):
+            row = rows.get(arm)
+            if row is None or row["action"] not in ("BUY", "SELL"):
+                continue
+            halt = None
+            if not is_synthetic(symbol):
+                calendar = self.calendar_loader()
+                try:
+                    halt = (calendar.halt_reason(now, strict=True) if calendar is not None
+                            else "US announcement calendar missing")
+                except ValueError:
+                    halt = "US announcement calendar invalid"
+            try:
+                report = self.executor.send(
+                    self.store, decision_id=row["decision_id"], symbol=symbol, side=row["action"], arm=arm,
+                    plan={**plan, "max_age_seconds": int(plan["horizon_bars"] * step)}, limits=self.limits_provider(),
+                    risk=self.risk_provider(), ai_spend=self.store.costs()["total_usd"], offset_hours=self.offset_hours,
+                    now=now, halt=halt, rationale=json.loads(row["detail"]).get("rationale", ""))
+            except Exception as exc:  # noqa: BLE001 - an execution problem must never stop the analysis
+                self.store.journal.log("autopilot.error", symbol, {"error": type(exc).__name__, "message": str(exc)[:200]})
+                summary.setdefault("orders", {})[arm] = f"error:{type(exc).__name__}"
+                return
+            summary.setdefault("orders", {})[arm] = report["state"] + (f":{report['code']}" if report.get("code") else "")
+            if report["state"] != "refused":
+                return
+
+    def reconcile_orders(self) -> dict:
+        """Follow open orders (also after the mode was switched off: positions still need their follow-up)."""
+        if self.executor is None or not self.store.open_orders():
+            return {"checked": 0}
+        with self._lock:
+            return self.executor.reconcile(self.store, now=self.clock(), offset_hours=self.offset_hours)
 
     # -- model arms
     def _model_arms(self, symbol, cycle_id, last, candles, config, propose, summary, scored):
@@ -497,8 +564,11 @@ def status(store: ResearchStore, now: datetime | None = None) -> dict:
             "last_cycle": beat.get("last_cycle", {}), "symbol_status": beat.get("symbol_status", {}),
             "decisions_by_status": counts, "decisions_today": today,
             "shadow_outcomes": outcomes, "costs": store.costs(),
-            "demo_auto_available": False,
-            "demo_auto_reason": "Étape 3 : les ordres automatiques en démo ne sont pas encore commissionnés."}
+            "demo_auto_available": store.state_get("autopilot_exec_ready") == "true",
+            "demo_auto_reason": ("Les ordres partent sur le compte DÉMO, un à la fois par instrument, avec stop et objectif "
+                                 "chez le courtier." if store.state_get("autopilot_exec_ready") == "true"
+                                 else "Pont d'exécution MetaTrader indisponible dans ce processus."),
+            "orders": store.order_summary(), "kill_switch": store.killed()}
 
 
 class AutopilotRunner:
@@ -510,6 +580,7 @@ class AutopilotRunner:
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._next_check: dict[str, datetime] = {}
+        self._last_reconcile: datetime | None = None
 
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
@@ -524,13 +595,21 @@ class AutopilotRunner:
     def tick(self) -> None:
         """One scheduling pass (public so tests and the CLI can drive it without a thread)."""
         store = self.autopilot.store
-        if get_mode(store) != "observe":
+        now = self.autopilot.clock()
+        if self.autopilot.executor is not None and (self._last_reconcile is None
+                                                    or (now - self._last_reconcile).total_seconds() >= 60):
+            self._last_reconcile = now
+            try:
+                self.autopilot.reconcile_orders()
+            except Exception as exc:  # noqa: BLE001
+                store.journal.log("autopilot.error", "reconcile", {"error": type(exc).__name__, "message": str(exc)[:200]})
+        if get_mode(store) not in ("observe", "demo_auto"):
             return
         config = get_config(store)
         now = self.autopilot.clock()
         for symbol in config["symbols"]:
             step = TIMEFRAME_SECONDS[timeframe_for(config, symbol)]
-            if get_mode(store) != "observe":  # switched off while we were working
+            if get_mode(store) not in ("observe", "demo_auto"):  # switched off while we were working
                 return
             if now < self._next_check.get(symbol, datetime.min.replace(tzinfo=timezone.utc)):
                 continue

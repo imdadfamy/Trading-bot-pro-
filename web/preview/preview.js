@@ -95,38 +95,59 @@ function modelNote(text) {
 }
 function updateModeBadge(pilot) {
   const badge = document.getElementById("mode-badge");
-  if (badge) badge.textContent = pilot && pilot.mode === "observe" ? "● OBSERVATION AUTOMATIQUE" : "● OBSERVATION";
+  if (badge) badge.textContent = pilot && pilot.mode === "demo_auto" ? "● DÉMO AUTOMATIQUE · ORDRES" : pilot && pilot.mode === "observe" ? "● OBSERVATION AUTOMATIQUE" : "● OBSERVATION";
+  const side = document.getElementById("side-status");
+  if (side && pilot) side.textContent = pilot.kill_switch === false ? "ORDRES AUTOMATIQUES ACTIFS (DÉMO)" : "ARRÊT DES NOUVELLES ENTRÉES ACTIF";
 }
 function pilotCard(pilot) {
-  const on = pilot.mode === "observe";
+  const auto = pilot.mode === "demo_auto";
+  const on = pilot.mode === "observe" || auto;
   const silent = on && !pilot.alive;
   const panel = card("Agents automatiques");
-  append(panel, info(on
+  append(panel, info(auto
+    ? (silent ? "Ordres automatiques activés mais aucun signe de vie récent : le serveur local a peut-être été arrêté. Les positions ouvertes gardent leur stop chez le courtier."
+              : "Les agents travaillent ET envoient des ordres sur le compte DÉMO (jamais de l'argent réel) : un seul par instrument, avec stop et objectif chez le courtier, dans les limites de risque des paramètres. « Trading algo » doit rester allumé dans MetaTrader.")
+    : on
     ? (silent ? "Les agents sont activés mais aucun signe de vie récent : le serveur local a peut-être été arrêté. Ils reprennent seuls dès qu'il redémarre."
               : "Les agents travaillent : à chaque nouvelle bougie ils analysent, et chaque avis est journalisé. Aucun ordre n'est envoyé ; des positions simulées mesurent ce que leurs avis auraient donné.")
     : "Les agents sont arrêtés. Activez-les : ils analysent chaque bougie, de jour comme de nuit, jusqu'à ce que vous les désactiviez.", silent));
-  labeled(panel, { état: on ? "EN OBSERVATION" : "ARRÊTÉ", cycles_terminés: pilot.cycles, décisions_du_jour: pilot.decisions_today,
-    résultats_simulés_mesurés: pilot.shadow_outcomes, erreurs: pilot.errors, dépense_IA_usd: pilot.costs?.total_usd });
+  labeled(panel, { état: auto ? "DÉMO AUTOMATIQUE" : on ? "EN OBSERVATION" : "ARRÊTÉ", cycles_terminés: pilot.cycles, décisions_du_jour: pilot.decisions_today,
+    résultats_simulés_mesurés: pilot.shadow_outcomes, erreurs: pilot.errors, dépense_IA_usd: pilot.costs?.total_usd,
+    ordres_clôturés: pilot.orders?.closed, résultat_net_des_ordres_usd: pilot.orders?.net_profit,
+    arrêt_des_nouvelles_entrées: pilot.kill_switch ? "ACTIF" : "levé" });
   Object.entries(pilot.last_cycle || {}).forEach(([symbol, cycle]) => append(panel, row([symbol,
     `${when(cycle.bar_close)} · ${fr("sessions", cycle.session)}`,
     cycle.halt ? "PRUDENCE : ANNONCE AMÉRICAINE" : modelNote(cycle.models)])));
   if (pilot.last_error) append(panel, info(`Dernière erreur : ${pilot.last_error}`, true));
   const actions = node("div", "pilot-actions");
-  const toggle = node("button", on ? "danger" : "", on ? "Désactiver les agents" : "Activer les agents");
+  const toggle = node("button", on ? "danger" : "", on ? "Désactiver les agents" : "Activer les agents (observation)");
   toggle.type = "button";
   toggle.addEventListener("click", () => openPilotDialog(on ? "off" : "observe"));
-  const demo = node("button", "", "Ordres automatiques en démo : étape suivante");
-  demo.type = "button"; demo.disabled = true; demo.title = pilot.demo_auto_reason || "";
-  append(actions, toggle, demo);
+  append(actions, toggle);
+  const second = node("button", auto ? "danger" : "", auto ? "Repasser en observation (plus d'ordres)" : "Activer les ordres automatiques en démo");
+  second.type = "button";
+  second.disabled = !pilot.demo_auto_available;
+  second.title = pilot.demo_auto_reason || "";
+  second.addEventListener("click", () => openPilotDialog(auto ? "observe" : "demo_auto"));
+  append(actions, second);
   append(panel, actions);
   return panel;
 }
+const DEMO_PHRASE = "ACTIVER LES ORDRES AUTOMATIQUES DEMO";
 function openPilotDialog(target) {
   pilotTarget = target;
-  document.getElementById("pilot-title").textContent = target === "observe" ? "Activer les agents" : "Désactiver les agents";
-  document.getElementById("pilot-text").textContent = target === "observe"
-    ? "Les agents analyseront chaque nouvelle bougie en continu, jour et nuit, tant que vous ne les désactivez pas. Ils n'envoient aucun ordre. Les appels IA consomment du budget (plafond réglable dans les paramètres)."
-    : "Les agents s'arrêtent après le cycle en cours. Les positions simulées déjà ouvertes seront mesurées à la prochaine activation.";
+  const titles = { observe: "Activer les agents (observation)", off: "Désactiver les agents", demo_auto: "Activer les ordres automatiques en démo" };
+  const texts = {
+    observe: "Les agents analyseront chaque nouvelle bougie en continu, jour et nuit, sans envoyer aucun ordre. Si des ordres automatiques étaient actifs, ils s'arrêtent : les positions déjà ouvertes gardent leur stop et leur objectif chez le courtier.",
+    off: "Les agents s'arrêtent après le cycle en cours. Si des ordres automatiques étaient actifs, les nouvelles entrées s'arrêtent aussi ; les positions ouvertes gardent leur stop et leur objectif chez le courtier et restent suivies.",
+    demo_auto: "Les agents enverront eux-mêmes des ordres sur le compte DÉMO, sans confirmation à chaque ordre : un seul par instrument, stop et objectif chez le courtier, limites de risque et de perte du jour des paramètres. « Trading algo » doit être allumé dans MetaTrader (ton geste). L'arrêt d'urgence bloque aussitôt les nouvelles entrées. Aucun argent réel."
+  };
+  document.getElementById("pilot-title").textContent = titles[target];
+  document.getElementById("pilot-text").textContent = texts[target];
+  const phrase = document.getElementById("pilot-phrase-label");
+  phrase.hidden = target !== "demo_auto";
+  document.getElementById("pilot-phrase-hint").textContent = DEMO_PHRASE;
+  document.getElementById("pilot-phrase").value = "";
   document.getElementById("pilot-message").textContent = "";
   document.getElementById("pilot-dialog").showModal();
 }
@@ -177,6 +198,17 @@ function sessionCard(perf) {
   cells.forEach(c => append(panel, row([`${fr("sessions", c.session)} · ${armName(c.arm)}`, `${c.trades} positions · R moyen ${num(c.mean_r)} · réussite ${pct(c.win_rate)}`, perfBadge(c)])));
   return panel;
 }
+function ordersCard(data) {
+  const panel = card("Ordres automatiques en démo");
+  const s = data.summary || {};
+  append(panel, info(`Compte DÉMO uniquement. Ordres clôturés : ${s.closed ?? 0} · résultat net : ${num(s.net_profit)} $ · réussite : ${pct(s.win_rate)}. Chaque ordre est relié à une décision journalisée et protégé par un stop chez le courtier.`));
+  const list = data.orders || [];
+  if (!list.length) append(panel, empty("Aucun ordre pour l'instant : les ordres partent seulement en mode « démo automatique »."));
+  list.forEach(o => { let why = ""; try { const code = JSON.parse(o.detail || "{}").code; if (code) why = ` · ${fr("refusals", code)}`; } catch (e) { why = ""; }
+    append(panel, row([`${when(o.opened_at)} · ${o.symbol}`, `${armName(o.arm)} · ${action(o.side)}${o.volume ? ` · lot ${o.volume}` : ""}${o.close_reason ? ` · sortie : ${o.close_reason}` : ""}`,
+      `${fr("orderStates", o.state, o.state)}${typeof o.profit === "number" ? ` · ${num(o.profit)} $` : ""}${why}`])); });
+  return panel;
+}
 function decisionCard(list) {
   const panel = card("Décisions des agents automatiques (achats, ventes et pannes IA)");
   if (!Array.isArray(list) || !list.length) append(panel, empty("Aucune décision d'achat ou de vente pour l'instant."));
@@ -191,10 +223,10 @@ async function dashboard(sequence) {
   (Array.isArray(runs)?runs:[]).forEach(run=>{if(typeof run.agent==="string"&&!run.agent.includes(":")&&!(run.agent in latest))latest[run.agent]=String(run.action);});
   if(Array.isArray(signals)&&signals[0]?.action)latest.director=String(signals[0].action);
   if(pilot){updateModeBadge(pilot);append(content,pilotCard(pilot));}
-  append(content,info("Recherche locale sur données d'exemple. Aucun courtier, flux live ou ordre n'est connecté."));
+  append(content,info(pilot&&pilot.mode!=="off"?"Données réelles du compte démo MetaTrader (lecture). Les ordres ne partent qu'en mode « démo automatique », sur le compte démo uniquement.":"Recherche locale sur données d'exemple. Aucun courtier, flux live ou ordre n'est connecté."));
   const snap=data.snapshot;
   if(snap) append(content,info(`Dernier instantané de marché : ${when(snap.observed_at)} · ${freshness(snap)} · ${snap.broker}`,true));
-  append(content,grid("metrics",stat("Capital démo","—","Pas encore affiché ici"),stat("Valeur du compte","—","Pas encore affiché ici"),stat("Résultat réel","—","Aucun ordre exécuté"),stat("Décisions",value(data.signal_count),"Cycles de recherche")));
+  append(content,grid("metrics",stat("Capital démo","—","Pas encore affiché ici"),stat("Valeur du compte","—","Pas encore affiché ici"),stat("Résultat des ordres démo",pilot&&pilot.orders?`${num(pilot.orders.net_profit)} $`:"—",pilot&&pilot.orders&&pilot.orders.closed?`${pilot.orders.closed} ordres clôturés (compte démo)`:"Aucun ordre clôturé"),stat("Décisions",value(data.signal_count),"Cycles de recherche")));
   const agents=card("Dernier avis de chaque rôle");
   ["graph","news","quant","risk","director"].forEach((id,i)=>append(agents,row([`${String(i+1).padStart(2,"0")}  ${role(id)}`,fr("roleHelp",id),latest[id]?action(latest[id]):"AUCUN CYCLE"])));
   append(content,grid("two",chart(history.candles||[]),agents));
@@ -221,7 +253,9 @@ async function generic(page,sequence) {
   if(page==="Market Intelligence") { append(content,info("Les événements d'exemple sont synthétiques. Aucune veille mondiale continue n'est active.",true));renderList("Articles reçus",data.map(item=>({headline:item.headline,label:`${item.source} · ${when(item.published_at)} · ${fr("status",item.status)} · gravité ${fr("severity",item.severity)} · pertinence ${fr("relevance",item.relevance,"non classée")}`})),["headline","label"],"Aucun article reçu");const releases=await get("/calendar/events").catch(()=>[]);if(sequence!==renderSequence)return;renderList("Calendrier économique importé",releases.map(r=>({when:when(r.scheduled_at),country:r.country,event:r.event,imp:`importance ${r.importance}/3`})),["when","country","event","imp"],"Aucun événement de calendrier importé"); }
   if(page==="Trading Terminal") { append(content,info("Journal des décisions de recherche. Aucun ordre MT5 n’a été envoyé."));renderList("Signaux",data.map(s=>({sym:`${s.symbol} · ${fr("status",s.status)}`,why:rationale(s.rationale),act:action(s.action)})),["sym","why","act"],"Aucun signal");
     const decisions=await get("/autopilot/decisions").catch(()=>[]);if(sequence!==renderSequence)return;
-    append(content,decisionCard(decisions)); }
+    append(content,decisionCard(decisions));
+    const orders=await get("/autopilot/orders").catch(()=>null);if(sequence!==renderSequence)return;
+    if(orders)append(content,ordersCard(orders)); }
   if(page==="AI Memory") renderList("Désaccords, pannes et recommandations",data,["cause","recommendation"],"Aucune mémoire enregistrée");
   if(page==="Strategy Lab") {
     append(content,info("Les chiffres de l’exemple synthétique ne mesurent aucune performance de marché.",true));
@@ -280,7 +314,7 @@ function settingsPage() {
       const capLabel=node("label","","Limiter le budget IA (décoché : aucun plafond, la dépense reste mesurée)");const capBox=node("input");capBox.type="checkbox";capBox.checked=settings.ai_cap_enabled!==false;append(capLabel,capBox);append(controls,capLabel);
       const risk=settings.risk||{};const riskInputs={};
       const riskGroup=node("div","form-group");
-      for(const [field,label,scale] of [["risk_per_trade","Risque par position (% du capital)",100],["max_daily_loss","Perte maximale par jour (% du capital)",100],["max_open_risk","Risque ouvert cumulé maximal (%)",100],["max_positions","Positions simultanées maximales",1],["max_spread","Écart d'achat-vente maximal (unités de prix)",1],["fixed_lot","Lot fixe (vide = calculé d'après le risque)",1],["commission_per_lot","Commission aller-retour par lot",1],["slippage_ticks","Glissement supposé (ticks)",1]]){
+      for(const [field,label,scale] of [["risk_per_trade","Risque par position (% du capital)",100],["max_daily_loss","Perte maximale par jour (% du capital)",100],["max_open_risk","Risque ouvert cumulé maximal (%)",100],["max_positions","Positions simultanées maximales",1],["max_spread","Écart d'achat-vente maximal (unités de prix ; 0 = automatique : 10 % du stop)",1],["fixed_lot","Lot fixe (vide = calculé d'après le risque)",1],["commission_per_lot","Commission aller-retour par lot",1],["slippage_ticks","Glissement supposé (ticks)",1]]){
         const raw=risk[field];const shown=(raw===null||raw===undefined)?"":Math.round(raw*scale*10000)/10000;
         const [box,input]=formLabel(label,"number",shown);input.step="any";input.min="0";riskInputs[field]=[input,scale];append(riskGroup,box);
       }
@@ -299,12 +333,12 @@ function settingsPage() {
   get("/autopilot").then(state=>{
     const cfg=state.config||{};const fields={};
     const group=node("div","form-group");
-    for(const [field,label,type] of [["symbols","Instruments (séparés par des virgules)","text"],["timeframe","Durée des bougies (M1, M5, M15, M30, H1)","text"],["model_every_minutes","Consultation de l'IA toutes les (minutes)","number"],["horizon_bars","Durée maximale d'une position simulée (bougies)","number"],["stop_atr_multiple","Stop simulé (multiple de la volatilité ATR)","number"],["reward_multiple","Objectif simulé (multiple du risque)","number"],["skill_pack_size","Compétences données à chaque analyste","number"]]){
+    for(const [field,label,type] of [["symbols","Instruments (séparés par des virgules)","text"],["timeframe","Durée des bougies (M1, M5, M15, M30, H1)","text"],["model_every_minutes","Consultation de l'IA toutes les (minutes)","number"],["horizon_bars","Durée maximale d'une position simulée (bougies)","number"],["stop_atr_multiple","Stop simulé (multiple de la volatilité ATR)","number"],["reward_multiple","Objectif simulé (multiple du risque)","number"],["skill_pack_size","Compétences données à chaque analyste","number"],["execution_arms","Méthodes dont les avis deviennent des ordres démo (séparées par des virgules ; ex. skills:director, forced:director, det:graph)","text"]]){
       const current=Array.isArray(cfg[field])?cfg[field].join(", "):cfg[field];const [box,input]=formLabel(label,type,current);if(type==="number")input.step="any";fields[field]=input;append(group,box);
     }
     const save=node("button","","Enregistrer les réglages des agents");
     save.addEventListener("click",async()=>{
-      const patch={symbols:fields.symbols.value.split(",").map(s=>s.trim()).filter(Boolean),timeframe:fields.timeframe.value.trim()};
+      const patch={symbols:fields.symbols.value.split(",").map(s=>s.trim()).filter(Boolean),timeframe:fields.timeframe.value.trim(),execution_arms:fields.execution_arms.value.split(",").map(s=>s.trim()).filter(Boolean)};
       for(const f of ["model_every_minutes","horizon_bars","stop_atr_multiple","reward_multiple","skill_pack_size"])patch[f]=Number(fields[f].value);
       try{await get("/autopilot/config",{method:"PATCH",headers:{"X-Operator-Key":keyInput.value,"X-Operator-Name":"preview-local","Content-Type":"application/json"},body:JSON.stringify(patch)});pilotNote.textContent="Réglages enregistrés (clé opérateur ci-dessus). Pris en compte au prochain cycle.";}catch(error){pilotNote.textContent=String(error);}
     });
@@ -336,7 +370,7 @@ const pilotDialog=document.getElementById("pilot-dialog"),pilotKey=document.getE
 document.getElementById("pilot-close").addEventListener("click",()=>{pilotKey.value="";pilotMessage.textContent="";pilotDialog.close();});
 document.getElementById("pilot-confirm").addEventListener("click",async()=>{
   try{
-    const result=await get("/autopilot/mode",{method:"POST",headers:{"X-Operator-Key":pilotKey.value,"X-Operator-Name":"preview-local","Content-Type":"application/json"},body:JSON.stringify({mode:pilotTarget})});
+    const result=await get("/autopilot/mode",{method:"POST",headers:{"X-Operator-Key":pilotKey.value,"X-Operator-Name":"preview-local","Content-Type":"application/json"},body:JSON.stringify({mode:pilotTarget,confirm:pilotTarget==="demo_auto"?document.getElementById("pilot-phrase").value:undefined})});
     pilotKey.value="";pilotMessage.textContent="";pilotDialog.close();updateModeBadge(result.status);render(active);
   }catch(error){pilotMessage.textContent=`Erreur : ${String(error)}`;}
 });

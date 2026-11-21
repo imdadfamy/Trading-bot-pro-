@@ -74,6 +74,11 @@ class ResearchStore:
               r_multiple REAL NOT NULL, bars_held INTEGER NOT NULL, mfe_r REAL NOT NULL,
               mae_r REAL NOT NULL, entry REAL NOT NULL, exit_price REAL NOT NULL,
               FOREIGN KEY(decision_id) REFERENCES decisions(decision_id));
+            CREATE TABLE IF NOT EXISTS auto_orders (
+              decision_id TEXT PRIMARY KEY, symbol TEXT NOT NULL, arm TEXT NOT NULL, side TEXT NOT NULL,
+              volume REAL, ticket INTEGER, position_ticket INTEGER, entry REAL, stop_loss REAL, take_profit REAL,
+              opened_at TEXT NOT NULL, max_age_seconds INTEGER, state TEXT NOT NULL, closed_at TEXT,
+              profit REAL, close_reason TEXT, detail TEXT NOT NULL DEFAULT '{}');
             CREATE TABLE IF NOT EXISTS direction_pending (
               decision_id TEXT PRIMARY KEY, symbol TEXT NOT NULL, at TEXT NOT NULL, action TEXT NOT NULL,
               horizon_bars INTEGER NOT NULL, unit REAL NOT NULL);
@@ -213,6 +218,44 @@ class ResearchStore:
         with self.journal.connect() as db:
             db.execute("INSERT INTO operational_state(name,value) VALUES(?,?) "
                        "ON CONFLICT(name) DO UPDATE SET value=excluded.value", (name, value))
+
+    def add_alert(self, kind: str, message: str) -> None:
+        with self.journal.connect() as db:
+            db.execute("INSERT INTO alerts(at,kind,message) VALUES(?,?,?)",
+                       (datetime.now(timezone.utc).isoformat(), kind, message[:500]))
+        self.journal.log("alert.raised", kind, {"message": message[:200]})
+
+    def record_order(self, *, decision_id, symbol, arm, side, state, opened_at, volume=None, ticket=None,
+                     position_ticket=None, entry=None, stop_loss=None, take_profit=None, max_age_seconds=None,
+                     detail=None, keep_existing=False) -> None:
+        verb = "INSERT OR IGNORE" if keep_existing else "INSERT OR REPLACE"  # a refusal never overwrites a real order row
+        with self.journal.connect() as db:
+            db.execute(f"{verb} INTO auto_orders(decision_id,symbol,arm,side,volume,ticket,position_ticket,entry,"
+                       "stop_loss,take_profit,opened_at,max_age_seconds,state,detail) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                       (decision_id, symbol, arm, side, volume, ticket, position_ticket, entry, stop_loss, take_profit,
+                        opened_at.isoformat(), max_age_seconds, state, json.dumps(detail or {}, default=str)))
+
+    def open_orders(self) -> list[dict]:
+        with self.journal.connect() as db:
+            return [dict(r) for r in db.execute("SELECT * FROM auto_orders WHERE state='open' ORDER BY opened_at")]
+
+    def close_order(self, decision_id: str, *, state: str, profit, reason: str, now) -> None:
+        with self.journal.connect() as db:
+            db.execute("UPDATE auto_orders SET state=?, profit=?, close_reason=?, closed_at=? WHERE decision_id=?",
+                       (state, profit, reason, now.isoformat(), decision_id))
+
+    def orders(self, limit: int = 60) -> list[dict]:
+        with self.journal.connect() as db:
+            return [dict(r) for r in db.execute("SELECT * FROM auto_orders ORDER BY opened_at DESC LIMIT ?",
+                                                (min(max(limit, 1), 300),))]
+
+    def order_summary(self) -> dict:
+        with self.journal.connect() as db:
+            counts = {r["state"]: r["n"] for r in db.execute("SELECT state, COUNT(*) AS n FROM auto_orders GROUP BY state")}
+            net, wins, closed = db.execute("SELECT COALESCE(SUM(profit),0), COALESCE(SUM(profit>0),0), COUNT(*) "
+                                           "FROM auto_orders WHERE state='closed'").fetchone()
+        return {"by_state": counts, "closed": closed, "net_profit": round(net, 2),
+                "win_rate": round(wins / closed, 4) if closed else None}
 
     def record_usage(self, *, agent, provider, model, input_tokens, output_tokens, cost_usd):
         if min(input_tokens, output_tokens, cost_usd) < 0:
