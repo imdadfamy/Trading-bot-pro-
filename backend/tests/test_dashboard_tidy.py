@@ -123,6 +123,57 @@ class DashboardTests(unittest.TestCase):
             self.assertEqual(service.read("/readiness")["execution_mode"], "observe")
 
 
+class KeepAwakeTests(unittest.TestCase):
+    def test_sleep_is_prevented_only_while_the_agents_work_or_a_position_is_open(self):
+        from trading_pro.keep_awake import ES_CONTINUOUS, ES_SYSTEM_REQUIRED, KeepAwake
+        calls = []
+        with tempfile.TemporaryDirectory() as temp:
+            store, pilot, _ = build(temp, {"XAUUSD": rising("XAUUSD")})
+            autopilot.set_config(store, {"symbols": ["XAUUSD"]}, author="t")
+            runner = autopilot.AutopilotRunner(pilot, keep_awake=KeepAwake(setter=calls.append))
+            runner.tick()  # mode off, nothing open
+            self.assertEqual(calls[-1], ES_CONTINUOUS)
+            self.assertFalse(autopilot.status(store)["keep_awake"])
+            autopilot.set_mode(store, "observe", author="t")
+            runner.tick()
+            self.assertEqual(calls[-1], ES_CONTINUOUS | ES_SYSTEM_REQUIRED)
+            self.assertTrue(autopilot.status(store)["keep_awake"])
+            autopilot.set_mode(store, "off", author="t")
+            store.record_order(decision_id="a", symbol="XAUUSD", arm="x", side="BUY", state="open", opened_at=NOW, position_ticket=1)
+            runner.tick()  # agents off but a position still needs its follow-up
+            self.assertEqual(calls[-1], ES_CONTINUOUS | ES_SYSTEM_REQUIRED)
+            store.close_order("a", state="closed", profit=1.0, reason="stop", now=NOW)
+            runner.tick()
+            self.assertEqual(calls[-1], ES_CONTINUOUS)
+            self.assertFalse(autopilot.status(store)["keep_awake"])
+
+    def test_a_missing_or_failing_power_api_never_breaks_the_pilot(self):
+        from trading_pro.keep_awake import KeepAwake
+        absent = KeepAwake(setter=lambda flags: None)
+        absent._setter = None  # a system without the power API (not Windows)
+        self.assertFalse(absent.available)
+        self.assertFalse(absent.set(True))
+
+        def broken(flags):
+            raise OSError("no power api")
+        guard = KeepAwake(setter=broken)
+        self.assertFalse(guard.set(True))
+        self.assertFalse(guard.holding)
+
+    def test_the_request_is_released_when_the_loop_ends(self):
+        from trading_pro.keep_awake import ES_CONTINUOUS, KeepAwake
+        calls = []
+        with tempfile.TemporaryDirectory() as temp:
+            store, pilot, _ = build(temp, {"XAUUSD": rising("XAUUSD")})
+            runner = autopilot.AutopilotRunner(pilot, poll_seconds=0.01, keep_awake=KeepAwake(setter=calls.append))
+            autopilot.set_mode(store, "observe", author="t")
+            runner.start()
+            runner._stop.set()
+            runner._thread.join(5)
+            self.assertEqual(calls[-1], ES_CONTINUOUS)
+            self.assertEqual(store.state_get("autopilot_keep_awake"), "false")
+
+
 class AccountTests(unittest.TestCase):
     class Ex(FakeExecutor):
         def __init__(self):

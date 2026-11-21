@@ -241,7 +241,8 @@ function pilotCard(pilot) {
   const panel = card("Agents automatiques");
   const strip = node("div", "pilot-strip");
   append(strip, node("span", `dot ${on ? (silent ? "warn" : "live") : ""}`), node("strong", "", auto ? "DÉMO AUTOMATIQUE" : on ? "EN OBSERVATION" : "ARRÊTÉS"),
-    node("span", "sub", `arrêt des nouvelles entrées : ${pilot.kill_switch ? "ACTIF" : "levé"}`));
+    node("span", "sub", `arrêt des nouvelles entrées : ${pilot.kill_switch ? "ACTIF" : "levé"}`),
+    node("span", "sub", pilot.keep_awake ? "· Windows ne se met pas en veille tant que les agents travaillent" : on ? "· attention : la mise en veille de Windows arrêterait les agents" : ""));
   append(panel, strip);
   append(panel, info(auto && pilot.kill_switch
     ? "ARRÊT D'URGENCE ACTIF : le pilote analyse toujours, mais aucune nouvelle entrée n'est tentée. Les positions déjà ouvertes gardent leur stop et leur objectif chez le courtier et restent suivies. Pour reprendre, clique sur « Reprendre les ordres »."

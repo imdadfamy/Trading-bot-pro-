@@ -69,3 +69,10 @@ Un point ne vaut pas la même chose partout : pour un lot, un mouvement d'une un
 - `close_if_profit` : la position est fermée au marché **seulement si elle est en gain** (jamais une position perdante n'est fermée avant son stop) ;
 - `close` : la position est fermée.
 Dans tous les cas l'ordre inverse n'est pas ouvert en même temps ; si le signal persiste, il passe ensuite par tous les garde-fous comme un ordre ordinaire une fois la position partie. La fermeture sur signal contraire reste possible quand l'arrêt d'urgence est actif (elle ne fait que réduire le risque). Fermer plus tôt un gain coupe aussi les gains qui auraient continué : aucune preuve ne dit quelle règle est la meilleure, c'est ce que la mesure dira.
+
+## Mise en veille de l'ordinateur
+Un ordinateur en veille ne fait **rien** : ni application locale, ni MetaTrader. Ce qui continue de protéger : le stop et l'objectif de chaque position, posés chez le courtier. Ce qui s'arrête : l'analyse, le suivi, la fermeture au délai, l'enregistrement des résultats (le pilote rattrape les bougies manquées au réveil ; les positions simulées dont la bougie d'entrée manque sont abandonnées).
+
+**Intégré à l'application.** Tant que les agents travaillent (ou qu'une position doit être suivie), l'application demande à Windows de ne pas se mettre en veille **tout seul** (même appel que les lecteurs vidéo ; aucun réglage de Windows n'est modifié ; la demande disparaît à l'arrêt de l'application). L'écran peut s'éteindre. Un message sur la carte du pilote indique si c'est actif. Cela n'empêche pas : un clic sur « Mettre en veille », la fermeture du capot d'un portable (sauf réglage « ne rien faire » dans les options d'alimentation), une batterie vide, une mise à jour qui redémarre l'ordinateur.
+
+**Pour fonctionner même ordinateur éteint** : il faut un autre ordinateur toujours allumé. Seul un serveur Windows distant (VPS, environ 20 à 35 € par mois d'après le cahier des charges, avec MetaTrader 5 installé) ou un second PC laissé allumé le permet. Rien n'est commandé ni installé pour cela.

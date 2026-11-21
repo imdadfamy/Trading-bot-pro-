@@ -755,13 +755,16 @@ def status(store: ResearchStore, now: datetime | None = None) -> dict:
             "demo_auto_reason": ("Les ordres partent sur le compte DÉMO, un à la fois par instrument, avec stop et objectif "
                                  "chez le courtier." if store.state_get("autopilot_exec_ready") == "true"
                                  else "Pont d'exécution MetaTrader indisponible dans ce processus."),
-            "orders": store.order_summary(), "kill_switch": store.killed()}
+            "orders": store.order_summary(), "kill_switch": store.killed(),
+            "keep_awake": store.state_get("autopilot_keep_awake") == "true"}
 
 
 class AutopilotRunner:
     """Daemon thread that follows the persisted mode; safe to start once per process."""
 
-    def __init__(self, autopilot: Autopilot, *, poll_seconds: float = 10.0):
+    def __init__(self, autopilot: Autopilot, *, poll_seconds: float = 10.0, keep_awake=None):
+        from .keep_awake import KeepAwake
+        self.keep_awake = keep_awake if keep_awake is not None else KeepAwake()
         self.autopilot = autopilot
         self.poll = poll_seconds
         self._stop = threading.Event()
@@ -783,6 +786,11 @@ class AutopilotRunner:
         """One scheduling pass (public so tests and the CLI can drive it without a thread)."""
         store = self.autopilot.store
         now = self.autopilot.clock()
+        # Windows must not fall asleep while the agents work or a position still needs following
+        needed = get_mode(store) != "off" or bool(store.open_orders())
+        holding = self.keep_awake.set(needed)
+        if (store.state_get("autopilot_keep_awake") == "true") != holding:
+            store.state_set("autopilot_keep_awake", "true" if holding else "false")
         self.autopilot.refresh_account()
         try:
             self.autopilot.handle_close_request()
@@ -829,6 +837,16 @@ class AutopilotRunner:
         self.autopilot._beat()
 
     def _loop(self) -> None:
+        try:
+            self._run()
+        finally:
+            self.keep_awake.set(False)  # the request belongs to this thread: release it when the loop ends
+            try:
+                self.autopilot.store.state_set("autopilot_keep_awake", "false")
+            except Exception:  # noqa: BLE001
+                pass
+
+    def _run(self) -> None:
         while not self._stop.is_set():
             try:
                 self.tick()
