@@ -28,7 +28,7 @@ Compute the round-trip cost as one spread plus assumed slippage and commission. 
 Measured median bar spread: Boom 1000 0.152 on a price near 14,940 (about 9% of the average M1 bar range 1.73); Crash 1000 0.060 on 5,765 (about 9% of an average range 0.70); Volatility 10 (2s) 0.162 and Volatility 10 (1s) 0.33 on H4 bars with prices near 6,000 (about 2% of a median H1 bar range of 7.8 and 15.4 respectively). One real demo order on Volatility 75 cost a spread of 13.7 on a 38,900 price. Commissions: none charged on the one measured order.
 
 ## Decision rules
-State the cost in R in the rationale. If cost / stop exceeds 0.1, vote WAIT unless the target is at least ten times the cost. Never ignore the spread because bars look profitable on closes alone.
+State the cost in R in the rationale. The execution layer widens every stop to at least ten spreads, so the cost stays at or below 0.1 R by construction; vote WAIT only when the idea itself needs a tighter stop than that (for example an M1 scalp) or when the live spread is far above the bar spread. Never ignore the spread because bars look profitable on closes alone.
 
 ## Limits
 Spread is a bar statistic, not tick-by-tick; slippage and commission were measured on a single order. Contract values can change.

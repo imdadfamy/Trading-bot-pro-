@@ -193,6 +193,46 @@ class SendTests(Base):
         self.assertEqual(fake.positions, [])
 
 
+class SynthMT5(AutoMT5):
+    """Boom 500 as measured on the demo account: contract size 1, one dollar per lot per price unit, minimum lot 0.2."""
+
+    def symbol_info(self, name):
+        return NS(name=name, visible=True, point=0.001, digits=3, volume_min=0.2, volume_max=190.0, volume_step=0.01,
+                  filling_mode=1, trade_mode=4, trade_stops_level=1173, trade_tick_size=0.001, trade_tick_value=0.001)
+
+    def symbol_info_tick(self, name):
+        return NS(time=int(datetime.now(timezone.utc).timestamp()), bid=5643.884, ask=5643.884 + self.spread)
+
+
+class InstrumentScaleTests(Base):
+    def boom(self, side, plan_stop=12.0, **kw):
+        fake = SynthMT5(spread=0.528, **kw)
+        report = self.executor(fake).send(self.store, decision_id=f"b-{side}", symbol="Boom 500 Index", side=side, arm="a",
+                                          plan={**PLAN, "stop_distance": plan_stop}, limits=Limits(max_spread=0.0),
+                                          risk=RISK, ai_spend=0, offset_hours=0.0, now=utcnow(), halt=None)
+        return fake, report
+
+    def test_the_same_risk_gives_a_large_lot_on_a_cheap_point_and_a_small_one_on_gold(self):
+        gold = AutoMT5()
+        self.send(gold, decision_id="g")
+        boom, report = self.boom("BUY")
+        self.assertEqual(report["state"], "open")
+        self.assertEqual(gold.sent[0]["volume"], 0.16)
+        self.assertAlmostEqual(boom.sent[0]["volume"], 4.16, places=2)  # 50 dollars over 12 price units at 1 dollar each
+        self.assertGreater(boom.sent[0]["volume"], 0.2)  # far above the minimum lot: it is never the binding constraint
+
+    def test_on_the_side_a_spike_runs_against_the_lot_is_smaller_to_cover_a_jumped_stop(self):
+        favourable, _ = self.boom("BUY")   # a spike up helps a buy on Boom
+        adverse, _ = self.boom("SELL")     # ...and hurts a sell
+        self.assertLess(adverse.sent[0]["volume"], favourable.sent[0]["volume"])
+        self.assertAlmostEqual(adverse.sent[0]["volume"], favourable.sent[0]["volume"] / 1.5, delta=0.05)
+
+    def test_a_cheap_instrument_is_not_refused_for_its_minimum_lot_or_its_spread_once_the_stop_fits_the_cost(self):
+        fake, report = self.boom("SELL", plan_stop=11.3)  # the spike stop of Boom 500: spread 0.528 is under 10% of it
+        self.assertEqual(report["state"], "open")
+        self.assertGreaterEqual(fake.sent[0]["volume"], 0.2)
+
+
 class ReconcileTests(Base):
     def open_one(self, fake, decision_id="d1"):
         self.send(fake, decision_id=decision_id)

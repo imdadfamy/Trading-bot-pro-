@@ -628,6 +628,32 @@ class ForcedAndDriftTests(unittest.TestCase):
         self.assertEqual(data["drift_short"]["window_bars"], 20)
 
 
+class PlanTests(unittest.TestCase):
+    """The stop adapts to the instrument; the lot is then sized from money, never refused for its scale."""
+
+    CONFIG = {"stop_atr_multiple": 2.0, "reward_multiple": 2.0, "horizon_bars": 48}
+
+    def test_the_volatility_stop_wins_when_costs_are_small(self):
+        plan = autopilot.trade_plan(rising("XAUUSD"), self.CONFIG)
+        self.assertEqual(plan["stop_basis"], "atr")
+
+    def test_a_stop_is_never_tighter_than_ten_spreads(self):
+        wide = [candle("Volatility 10 Index", LAST_CLOSE - STEP * (299 - i), 100 + 0.01 * i, spread=0.5) for i in range(300)]
+        plan = autopilot.trade_plan(wide, self.CONFIG)
+        self.assertEqual(plan["stop_basis"], "spread")
+        self.assertAlmostEqual(plan["stop_distance"], 5.0)  # the spread then costs 0.1 R
+
+    def test_boom_and_crash_stops_cover_the_typical_spike_or_the_measured_default(self):
+        flat = [candle("Boom 500 Index", LAST_CLOSE - STEP * (299 - i), 5000 + 0.001 * i, spread=0.5) for i in range(300)]
+        plan = autopilot.trade_plan(flat, self.CONFIG)
+        self.assertEqual(plan["stop_basis"], "spike")
+        self.assertAlmostEqual(plan["stop_distance"], 0.002 * flat[-1].close)  # too few spikes: the measured default 0.2%
+        spiky = EnrichedSkillTests().spiky("Crash 500 Index", direction=-1, size=8.0)
+        measured = autopilot.trade_plan(spiky, self.CONFIG)
+        self.assertEqual(measured["stop_basis"], "spike")
+        self.assertAlmostEqual(measured["stop_distance"], 8.0 / spiky[-1].close * spiky[-1].close, delta=1.5)
+
+
 class LimitsTests(unittest.TestCase):
     """More observations from the same cycles, and no wasted first cycle on a freshly added symbol."""
 

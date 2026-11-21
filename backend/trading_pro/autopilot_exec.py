@@ -23,6 +23,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, ROUND_DOWN
 
+from .autopilot_features import has_family_word
 from .broker import MAGIC, MT5DemoBroker, execute_demo, reconcile_demo_ticket
 from .core import Action, Instrument, Limits, RiskState, Signal, Snapshot, check_risk
 from .mt5_send import SEND_ALLOWED
@@ -156,9 +157,16 @@ class Executor:
                             status="validated", horizon=f"{plan['horizon_bars']} bars",
                             invalidation="New critical event, stale quote or changed market snapshot")
             quote = Snapshot(cycle, symbol, tick.bid, tick.ask, now)
+            # On the side a spike runs against (a sell on Boom, a buy on Crash, either side on Jump/DEX) the stop can be
+            # jumped: size as if half a stop more could be lost, so the planned risk is not understated.
+            adverse = ((has_family_word(symbol, ("boom",)) and not buy) or (has_family_word(symbol, ("crash",)) and buy)
+                       or has_family_word(symbol, ("jump", "dex")))
+            slippage_ticks = float(risk.get("slippage_ticks", 0.0))
+            if adverse:
+                slippage_ticks = max(slippage_ticks, 0.5 * distance / float(info.trade_tick_size))
             instrument = Instrument(float(info.trade_tick_size), float(info.trade_tick_value), float(info.volume_min),
                                     float(info.volume_max), float(info.volume_step),
-                                    float(risk.get("commission_per_lot", 0.0)), float(risk.get("slippage_ticks", 0.0)))
+                                    float(risk.get("commission_per_lot", 0.0)), slippage_ticks)
             fixed = risk.get("fixed_lot")
             # Spreads live on very different price scales: 0 means automatic, a spread of at most 10% of the stop.
             ceiling = limits.max_spread if limits.max_spread > 0 else 0.10 * distance

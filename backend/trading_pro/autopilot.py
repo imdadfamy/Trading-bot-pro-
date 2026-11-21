@@ -17,7 +17,7 @@ from hashlib import sha256
 from statistics import median
 from uuid import uuid4
 
-from .autopilot_features import atr, features, has_family_word, is_synthetic, skill_pack
+from .autopilot_features import atr, features, has_family_word, is_synthetic, skill_pack, spike_stats
 from .agents import graph_agent
 from .backtest import BacktestConfig, sma_signal
 from .core import Action, Limits, Report, Snapshot, utcnow
@@ -132,12 +132,35 @@ def consensus(votes: dict[str, Action]) -> tuple[Action, str]:
     return Action.WAIT, "no pair of analysts agrees on a direction"
 
 
+COST_FLOOR_FACTOR = 10.0   # a stop is never tighter than ten spreads: the spread then costs at most 0.1 R
+SPIKE_FLOOR_PCT = 0.002    # Boom/Crash default (measured p90 spike on Boom/Crash 1000 M1, 19 Nov 2026): 0.2% of price
+
+
 def trade_plan(candles: list[Candle], config: dict) -> dict | None:
+    """Stop and target of a decision, adapted to the instrument rather than refused.
+
+    The stop is the largest of: the volatility stop (ATR), ten spreads (cost cap) and, for Boom/Crash style indices,
+    the 90th-percentile spike (a tighter stop is simply jumped). The volume is then sized from the money at risk, so
+    an instrument whose points are cheap (a synthetic index: one lot earns one dollar per price unit; gold: a hundred)
+    gets a bigger or smaller lot, never an automatic refusal for its scale.
+    """
     value = atr(candles)
     if not value or value <= 0:
         return None
-    return {"stop_distance": round(config["stop_atr_multiple"] * value, 8), "reward_multiple": config["reward_multiple"],
-            "horizon_bars": int(config["horizon_bars"]), "atr_14": round(value, 8)}
+    last = candles[-1]
+    floors = {"atr": config["stop_atr_multiple"] * value}
+    spread = max(last.ask - last.bid, 0.0)
+    if spread > 0:
+        floors["spread"] = COST_FLOOR_FACTOR * spread
+    if has_family_word(last.symbol, ("boom", "crash")):
+        spikes = spike_stats(candles)
+        if spikes and spikes["count"] >= 10 and spikes["p90_move_pct"]:
+            floors["spike"] = spikes["p90_move_pct"] / 100 * last.close
+        else:
+            floors["spike"] = SPIKE_FLOOR_PCT * last.close  # too few spikes in the window to measure: the default
+    basis = max(floors, key=floors.get)
+    return {"stop_distance": round(floors[basis], 8), "reward_multiple": config["reward_multiple"],
+            "horizon_bars": int(config["horizon_bars"]), "atr_14": round(value, 8), "stop_basis": basis}
 
 
 def resolve_trade(side: str, plan: dict, bars: list[Candle], *, spike_gap: bool = False,
