@@ -38,15 +38,35 @@ class Service:
         self.store = ResearchStore(database)
         self.skills_root = Path(skills_root) if skills_root else Path(__file__).resolve().parents[2] / "skills"
 
+    NOISY_EVENTS = {"autopilot.decision", "autopilot.cycle", "autopilot.scored", "market.snapshot", "signal.created",
+                    "model.compared", "order.reserved", "order.result"}
+    VOTE_ARMS = {"graph": "skills:graph", "quant": "skills:quant", "news": "skills:news", "director": "skills:director",
+                 "ai_director": "ai:director"}
+
+    def latest_votes(self) -> dict:
+        """Latest real answer of each role, from the pilot's ledger (a failed model call is not an answer)."""
+        votes = {}
+        with self.store.journal.connect() as db:
+            for role, arm in self.VOTE_ARMS.items():
+                row = db.execute("SELECT action, symbol, at FROM decisions WHERE arm=? AND status<>'model_failed' "
+                                 "ORDER BY at DESC LIMIT 1", (arm,)).fetchone()
+                if row:
+                    votes[role] = dict(row)
+        return votes
+
     def dashboard(self):
+        from . import autopilot
         quote = self.store.latest_snapshot()
-        return {"mode": "observation", "broker": "disconnected", "kill_switch": self.store.killed(),
-                "symbol": "XAUUSD", "live_trading": False, "snapshot": quote,
-                "pending_order_intents": len(self.store.journal.pending_intents()),
-                "agents": ["graph", "news", "quant", "risk", "director"],
-                "events": self.store.journal.events(30),
-                "signal_count": len(self.store.recent("signals", 500)),
-                "costs": self.store.costs()}
+        status = autopilot.status(self.store)
+        events = [e for e in self.store.journal.events(400) if e["kind"] not in self.NOISY_EVENTS][:30]
+        return {"mode": status["mode"], "broker": "connected" if status["alive"] else "disconnected",
+                "kill_switch": self.store.killed(), "symbol": (quote or {}).get("symbol"), "live_trading": False,
+                "snapshot": quote, "pending_order_intents": len(self.store.journal.pending_intents()),
+                "agents": ["graph", "news", "quant", "risk", "director"], "events": events,
+                "account": json.loads(self.store.state_get("autopilot_account") or "null"),
+                "latest_votes": self.latest_votes(),
+                "decisions_total": sum(status["decisions_by_status"].values()),
+                "signal_count": len(self.store.recent("signals", 500)), "costs": self.store.costs()}
 
     def settings(self):
         with self.store.journal.connect() as db:
@@ -110,14 +130,34 @@ class Service:
         self.store.journal.log("settings.changed", "settings", {"version": version, "author": author})
         return {"version": version}
 
-    def read(self, path: str):
+    def candles_view(self, query: dict) -> dict:
+        """Bars of ONE instrument (the pilot stores several), real ones first; fictitious example bars only as a fallback."""
+        from . import autopilot
+        config = autopilot.get_config(self.store)
+        snapshot = self.store.latest_snapshot()
+        symbol = (query.get("symbol") or [None])[0] or (snapshot or {}).get("symbol") or config["symbols"][0]
+        with self.store.journal.connect() as db:
+            rows = db.execute("SELECT payload FROM candles WHERE symbol=? AND broker<>'SYNTHETIC-NOT-A-BROKER' "
+                              "ORDER BY closed_at DESC LIMIT 120", (symbol,)).fetchall()
+            example = False
+            if not rows:
+                rows = db.execute("SELECT payload FROM candles WHERE symbol=? ORDER BY closed_at DESC LIMIT 120",
+                                  (symbol,)).fetchall()
+                example = bool(rows)
+        return {"candles": [json.loads(r["payload"]) for r in reversed(rows)], "symbol": symbol,
+                "symbols": config["symbols"], "timeframe": autopilot.timeframe_for(config, symbol), "live": False,
+                "source": "jeu d'exemple fictif" if example else "MetaTrader (compte démo), bougies enregistrées"}
+
+    def read(self, path: str, query: dict | None = None):
+        query = query or {}
         if path == "/health":
             return {"status": "ok", "mode": "observation", "live_trading": False}
         if path == "/readiness":
             from .experiments import GATES
             from .integrations import credential_status
+            from . import autopilot
             return {"ready_for_local_review": True, "ready_for_14_day_demo": False,
-                    "execution_mode": "observation", "kill_switch": self.store.killed(),
+                    "execution_mode": autopilot.get_mode(self.store), "kill_switch": self.store.killed(),
                     "credentials": credential_status(),
                     "blocked_gates": list(GATES),
                     "note": "Gates need independent evidence; this endpoint does not attest external integrations"}
@@ -128,9 +168,7 @@ class Service:
         if path == "/market/snapshot":
             return {"snapshot": self.store.latest_snapshot(), "live": False}
         if path == "/market/candles":
-            rows = self.store.recent("candles", 120)
-            return {"candles": [json.loads(row["payload"]) for row in reversed(rows)],
-                    "live": False, "source": "local research import"}
+            return self.candles_view(query)
         if path == "/news/events":
             from .core import utcnow
             return self.store.news_as_of(utcnow())
@@ -180,6 +218,9 @@ class Service:
             return autopilot.status(self.store)
         if path == "/autopilot/orders":
             return {"summary": self.store.order_summary(), "orders": self.store.orders()}
+        if path == "/autopilot/analyses":
+            from . import autopilot_stats
+            return autopilot_stats.recent_analyses(self.store)
         if path == "/autopilot/performance":
             from . import autopilot_stats
             return autopilot_stats.performance(self.store)

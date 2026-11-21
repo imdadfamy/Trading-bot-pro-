@@ -46,8 +46,8 @@ async function run() {
   await tick();
   complete("/labels.json", { actions: { WAIT: "ATTENTE (aucune entrée)" }, roles: { quant: "Analyste quantitatif" } });
   await tick();
-  for (const url of ["/dashboard", "/agents", "/signals"]) complete(url, url === "/dashboard" ? { events: [] } : []);
-  complete("/market/candles", { candles: [] });
+  complete("/dashboard", { events: [], latest_votes: {} });
+  complete("/market/candles", { candles: [], symbols: [] });
   complete("/autopilot", { mode: "off", alive: false, last_cycle: {}, cycles: 0, decisions_today: 0, shadow_outcomes: 0, errors: 0, costs: { total_usd: 0 } });
   await tick();
   const agents = vm.runInContext('render("AI Agents")', context);
@@ -60,15 +60,15 @@ async function run() {
   assert.match(text(content), /Compétence visible/);
   assert.match(text(content), /Analyste quantitatif/); // shared French label applied
   assert.doesNotMatch(text(content), /Chargement des données/);
-  complete("/agents", [{ agent: "ANCIENNE RÉPONSE", action: "WAIT" }]);
+  complete("/autopilot/analyses", [{ arm: "skills:graph", symbol: "ANCIENNE RÉPONSE", action: "WAIT", at: "2026-11-18T10:00:00+00:00", rationale: "" }]);
   await agents;
   await tick();
   assert.match(text(content), /Compétence visible/);
   assert.doesNotMatch(text(content), /ANCIENNE RÉPONSE/);
   const home = vm.runInContext('render("Command Center")', context);
   await tick();
-  for (const url of ["/dashboard", "/agents", "/signals"]) complete(url, url === "/dashboard" ? { events: [] } : []);
-  complete("/market/candles", { candles: [] });
+  complete("/dashboard", { events: [], latest_votes: {} });
+  complete("/market/candles", { candles: [], symbols: [] });
   complete("/autopilot", { mode: "off", alive: false, last_cycle: {}, cycles: 0, decisions_today: 0, shadow_outcomes: 0, errors: 0, costs: { total_usd: 0 } });
   await home;
   assert.doesNotMatch(text(content), /ANCIENNE RÉPONSE/);

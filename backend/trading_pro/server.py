@@ -5,7 +5,7 @@ import os
 from hmac import compare_digest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 from .service import Service
 
 
@@ -71,7 +71,7 @@ def handler_factory(service: Service, operator_key: str | None = None, runner=No
             if path == "/settings":
                 return self._json(200, service.settings())
             try:
-                self._json(200, service.read(path))
+                self._json(200, service.read(path, parse_qs(urlsplit(self.path).query)))
             except KeyError:
                 self._json(404, {"error": "Unknown route"})
 

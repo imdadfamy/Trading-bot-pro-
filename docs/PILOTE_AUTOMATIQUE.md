@@ -3,7 +3,7 @@
 **À quoi ça sert.** Les agents analysent chaque nouvelle bougie sur Volatility 10, Boom 500, Crash 500, Drift Switch 10/20/30 (lus en M1) et l'or (M5), jour et nuit, tant que tu ne les désactives pas. Ils **n'envoient aucun ordre**. Chaque avis est journalisé ; chaque achat ou vente ouvre une **position simulée** mesurée sur les vraies bougies suivantes (écart d'achat-vente inclus). C'est ainsi qu'on apprend quelles méthodes, quelles compétences et quelles sessions donnent de bonnes analyses.
 
 ## Utilisation
-1. Lance l'application (`Start-Local.ps1`) : le serveur local héberge le pilote. La clé opérateur s'affiche dans sa fenêtre PowerShell.
+1. Lance l'application (`Start-Local.ps1`) : le serveur local héberge le pilote. La clé opérateur s'affiche dans sa fenêtre PowerShell. Le démarrage est rapide : les vérifications complètes (`-Verify`) et les données d'exemple fictives (`-WithExamples`) sont désormais facultatives, et le lanceur ne régénère plus les compétences.
 2. Vue d'ensemble → **Activer les agents** → saisis la clé. Le mode est mémorisé : après un redémarrage du serveur, les agents reprennent seuls. **Désactiver les agents** les arrête après le cycle en cours.
 3. MetaTrader 5 doit être ouvert et connecté au compte démo (lecture seule). Le bouton « Trading algo » n'est pas nécessaire.
 4. Ne lance qu'**un seul** pilote à la fois (serveur ou commande `autopilot once`), sinon deux processus initialisent MetaTrader en même temps.

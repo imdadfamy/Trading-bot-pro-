@@ -237,6 +237,7 @@ class Autopilot:
         self.store = store
         self.fetch = fetch
         self.executor = executor
+        self._last_account = None
         self.limits_provider = limits_provider or Limits
         self.risk_provider = risk_provider or (lambda: {"fixed_lot": None, "commission_per_lot": 0.0, "slippage_ticks": 0.0})
         self.offset_hours = 0.0
@@ -530,6 +531,21 @@ class Autopilot:
             if report["state"] != "refused":
                 return
 
+    def refresh_account(self) -> None:
+        """Keep the account's capital and equity fresh for the dashboard (every five minutes, any mode)."""
+        if self.executor is None:
+            return
+        now = self.clock()
+        if self._last_account is not None and (now - self._last_account).total_seconds() < 300:
+            return
+        self._last_account = now
+        with self._lock:
+            try:
+                summary = self.executor.account_summary()
+            except Exception:  # noqa: BLE001 - the dashboard simply keeps its last values
+                return
+        self.store.state_set("autopilot_account", json.dumps({**summary, "at": now.isoformat()}))
+
     def reconcile_orders(self) -> dict:
         """Follow open orders (also after the mode was switched off: positions still need their follow-up)."""
         if self.executor is None or not self.store.open_orders():
@@ -679,6 +695,7 @@ class AutopilotRunner:
         """One scheduling pass (public so tests and the CLI can drive it without a thread)."""
         store = self.autopilot.store
         now = self.autopilot.clock()
+        self.autopilot.refresh_account()
         if self.autopilot.executor is not None and (self._last_reconcile is None
                                                     or (now - self._last_reconcile).total_seconds() >= 60):
             self._last_reconcile = now

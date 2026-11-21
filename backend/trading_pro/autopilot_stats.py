@@ -183,6 +183,23 @@ def direction_performance(store: ResearchStore) -> dict:
     return out
 
 
+def recent_analyses(store: ResearchStore, limit: int = 40) -> list[dict]:
+    """The latest real answers of the AI analysts and director, WAIT included (the ledger of what they said)."""
+    with store.journal.connect() as db:
+        rows = db.execute(
+            "SELECT at, symbol, session, arm, action, detail FROM decisions "
+            "WHERE arm IN ('skills:graph','skills:quant','skills:news','ai:director') AND status<>'model_failed' "
+            "ORDER BY at DESC, arm LIMIT ?", (min(max(limit, 1), 200),))
+        out = []
+        for row in rows:
+            item = dict(row)
+            detail = json.loads(item.pop("detail"))
+            item["rationale"] = detail.get("rationale", "")
+            item["skills"] = detail.get("skills", [])
+            out.append(item)
+        return out
+
+
 def recent_decisions(store: ResearchStore, limit: int = 60) -> list[dict]:
     with store.journal.connect() as db:
         rows = db.execute(

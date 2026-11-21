@@ -90,6 +90,15 @@ class Executor:
                             (getattr(d, "swap", 0) or 0) + (getattr(d, "fee", 0) or 0)
         return float(account.balance) - realised
 
+    def account_summary(self) -> dict:
+        """Capital and equity of the demo account, for the dashboard (read only)."""
+        mt5, account = self._connect()
+        try:
+            return {"balance": round(float(account.balance), 2), "equity": round(float(account.equity), 2),
+                    "currency": getattr(account, "currency", "USD"), "login_masked": "*" * 5 + str(account.login)[-3:]}
+        finally:
+            mt5.shutdown()
+
     # ------------------------------------------------------------------ sending
     def send(self, store, *, decision_id: str, symbol: str, side: str, arm: str, plan: dict, limits: Limits, risk: dict,
              ai_spend: float, offset_hours: float, now: datetime, halt: str | None, rationale: str = "") -> dict:

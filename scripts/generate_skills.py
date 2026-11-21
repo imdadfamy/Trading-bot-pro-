@@ -131,6 +131,11 @@ Fixture: missing input => WAIT; planted structure => detected; pure noise => not
 """, encoding="utf-8")
     assert len(catalog) == 27 + len(SYNTHETIC_SKILLS)
     (root / "catalog.json").write_text(json.dumps(catalog, ensure_ascii=False, indent=2), encoding="utf-8")
+    # The generic sheets above are only the starting point: the enriched versions (sources, measurements, decision
+    # rules, per-agent and per-family delivery) are applied on top, so regenerating can never lose them.
+    from enriched_skill_specs import main as apply_enrichment
+    apply_enrichment()
+
 
 if __name__ == "__main__":
     main()

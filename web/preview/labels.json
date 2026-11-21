@@ -49,7 +49,8 @@
     "none": "Aucun",
     "observe": "Observation automatique (aucun ordre)",
     "off": "Arrêté",
-    "demo_auto": "Démo automatique (ordres sur le compte démo)"
+    "demo_auto": "Démo automatique (ordres sur le compte démo)",
+    "connected": "Connecté (lecture du compte démo)"
   },
   "events": {
     "announcement.blackout": "Fenêtre de prudence : annonce américaine",
