@@ -50,6 +50,7 @@ async function run() {
   complete("/market/overview", { instruments: [] });
   complete("/market/candles", { candles: [], symbols: [] });
   complete("/autopilot", { mode: "off", alive: false, last_cycle: {}, cycles: 0, decisions_today: 0, shadow_outcomes: 0, errors: 0, costs: { total_usd: 0 } });
+  complete("/autopilot/positions", { positions: [] });
   await tick();
   const agents = vm.runInContext('render("AI Agents")', context);
   const skills = vm.runInContext('render("Skills Library")', context);
@@ -72,6 +73,7 @@ async function run() {
   complete("/market/overview", { instruments: [] });
   complete("/market/candles", { candles: [], symbols: [] });
   complete("/autopilot", { mode: "off", alive: false, last_cycle: {}, cycles: 0, decisions_today: 0, shadow_outcomes: 0, errors: 0, costs: { total_usd: 0 } });
+  complete("/autopilot/positions", { positions: [] });
   await home;
   assert.doesNotMatch(text(content), /ANCIENNE RÉPONSE/);
   assert.match(text(content), /AUCUN CYCLE/);

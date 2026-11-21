@@ -99,6 +99,51 @@ class Executor:
         finally:
             mt5.shutdown()
 
+    def positions_snapshot(self, offset_hours: float = 0.0) -> list[dict]:
+        """Live view of the positions of this project (read only): price, floating result, stop and target."""
+        mt5, _ = self._connect()
+        try:
+            rows = []
+            for p in self._ours(mt5):
+                opened = getattr(p, "time", 0) or 0
+                rows.append({
+                    "ticket": getattr(p, "ticket", None), "symbol": p.symbol, "side": "BUY" if getattr(p, "type", 0) == 0 else "SELL",
+                    "volume": p.volume, "price_open": p.price_open, "price_current": getattr(p, "price_current", None),
+                    "sl": getattr(p, "sl", 0) or 0, "tp": getattr(p, "tp", 0) or 0,
+                    "profit": round((getattr(p, "profit", 0) or 0) + (getattr(p, "swap", 0) or 0), 2),
+                    "opened_at": datetime.fromtimestamp(opened - offset_hours * 3600, tz=timezone.utc).isoformat() if opened else None})
+            return rows
+        finally:
+            mt5.shutdown()
+
+    def close_position_by_ticket(self, store, ticket: int, *, reason: str) -> dict:
+        """Close ONE position of this project at market (works with the emergency stop active: it only reduces risk)."""
+        mt5, _ = self._connect()
+        try:
+            target = [p for p in self._ours(mt5) if getattr(p, "ticket", None) == ticket]
+            if not target:
+                return {"status": "not_open"}
+            result = self._close(mt5, target[0])
+            store.journal.log("autopilot.closed_by_opposite_signal", str(ticket), {"symbol": target[0].symbol, "reason": reason,
+                                                                                    "result": result.get("status")})
+            return result
+        finally:
+            mt5.shutdown()
+
+    def close_all(self, store, *, author: str, now: datetime) -> dict:
+        """Close every position of this project, then arm the stop on new entries so that nothing reopens at once."""
+        mt5, _ = self._connect()
+        closed = []
+        try:
+            for p in self._ours(mt5):
+                closed.append({"ticket": getattr(p, "ticket", None), "symbol": p.symbol, **self._close(mt5, p)})
+        finally:
+            mt5.shutdown()
+        store.set_killed()
+        store.journal.log("autopilot.close_all", "global", {"author": author, "positions": len(closed),
+                                                             "sent": sum(1 for c in closed if c.get("status") == "sent")})
+        return {"closed": closed}
+
     # ------------------------------------------------------------------ sending
     def send(self, store, *, decision_id: str, symbol: str, side: str, arm: str, plan: dict, limits: Limits, risk: dict,
              ai_spend: float, offset_hours: float, now: datetime, halt: str | None, rationale: str = "") -> dict:

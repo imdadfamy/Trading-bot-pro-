@@ -58,3 +58,14 @@ Un point ne vaut pas la même chose partout : pour un lot, un mouvement d'une un
 - **Lot** = argent risqué (0,5 % du capital par défaut, réglable) divisé par le stop en argent. Du côté où un pic joue contre la position (vente sur Boom, achat sur Crash), on dimensionne comme si un demi-stop de plus pouvait être perdu.
 - **Valeurs réelles du 21 novembre 2026** (capital 10 000 $, 0,5 % = 50 $) : Volatility 10 stop 4,6 et lot 10,9 ; Boom 500 stop 11,3 et lot 4,4 ; Crash 500 stop 5,5 et lot 9,0 ; Drift Switch 10 stop 7,8 et lot 6,4 ; Drift Switch 20 stop 7,9 et lot 6,3 ; Drift Switch 30 stop 66,7 et lot 0,74 (écart de 10 % du stop : l'indice le plus coûteux). Le courtier a validé un ordre minimal d'achat et de vente sur les sept instruments (vérification sans envoi).
 - Le même stop sert à la position simulée et à l'ordre réel : leurs résultats restent comparables.
+
+## Suivi des positions et signaux contraires
+**Panneau « Positions ouvertes »** (Vue d'ensemble, sous la carte du pilote) : pour chaque position, l'instrument, le sens et le lot, la méthode qui l'a décidée, le cours actuel, le **résultat en cours** (lu chez le courtier toutes les 10 secondes), le stop et l'objectif, le temps restant avant la fermeture automatique, et le total en cours. Le bouton **Fermer toutes les positions** (clé opérateur et phrase `FERMER TOUTES LES POSITIONS DEMO`) ferme au prix du marché les positions du projet (jamais celles ouvertes à la main) puis active l'arrêt des nouvelles entrées ; « Reprendre les ordres » le lève.
+
+**Une seule position par instrument.** Le pilote n'ouvre jamais une deuxième position sur un instrument déjà occupé : pas de cumul dans le même sens, pas de position inverse en même temps (pas de couverture ni d'inversion aveugle, comme l'exige le cahier des charges).
+
+**Signal contraire pendant qu'une position est ouverte.** Si une méthode d'exécution annonce le sens opposé (par exemple vente alors qu'un achat est ouvert), le pilote l'enregistre, l'affiche sur la position (bandeau « Signal contraire reçu ») et dans le fil d'activité, puis applique la règle choisie dans Paramètres (`opposite_signal_policy`) :
+- `ignore` (par défaut) : la position garde son stop et son objectif ; ainsi la position réelle reste comparable à sa jumelle simulée ;
+- `close_if_profit` : la position est fermée au marché **seulement si elle est en gain** (jamais une position perdante n'est fermée avant son stop) ;
+- `close` : la position est fermée.
+Dans tous les cas l'ordre inverse n'est pas ouvert en même temps ; si le signal persiste, il passe ensuite par tous les garde-fous comme un ordre ordinaire une fois la position partie. La fermeture sur signal contraire reste possible quand l'arrêt d'urgence est actif (elle ne fait que réduire le risque). Fermer plus tôt un gain coupe aussi les gains qui auraient continué : aucune preuve ne dit quelle règle est la meilleure, c'est ce que la mesure dira.

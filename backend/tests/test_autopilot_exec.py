@@ -11,6 +11,7 @@ from trading_pro.autopilot import Autopilot, AutopilotRunner
 from trading_pro.autopilot_exec import Executor
 from trading_pro.broker import MAGIC
 from trading_pro.core import Limits, utcnow
+from trading_pro.service import Service
 from trading_pro.store import ResearchStore
 
 PLAN = {"stop_distance": 3.0, "reward_multiple": 2.0, "horizon_bars": 48, "max_age_seconds": 4 * 3600}
@@ -289,6 +290,20 @@ class ReconcileTests(Base):
 class FakeExecutor:
     def __init__(self, state="open"):
         self.sent, self.reconciled, self.state = [], 0, state
+        self.closed, self.close_all_calls, self.snapshots, self.positions = [], [], 0, []
+
+    def positions_snapshot(self, offset_hours=0.0):
+        self.snapshots += 1
+        return list(self.positions)
+
+    def close_position_by_ticket(self, store, ticket, *, reason):
+        self.closed.append((ticket, reason))
+        return {"status": "sent"}
+
+    def close_all(self, store, *, author, now):
+        self.close_all_calls.append(author)
+        store.set_killed()
+        return {"closed": []}
 
     def send(self, store, **kwargs):
         self.sent.append(kwargs)
@@ -309,6 +324,223 @@ LAST_CLOSE = datetime(2026, 11, 18, 14, 5, tzinfo=timezone.utc)
 def trending(symbol, n=300):
     from test_autopilot import candle
     return [candle(symbol, LAST_CLOSE - STEP * (n - 1 - i), 100 + 0.1 * i + (0.15 if i % 2 else -0.15)) for i in range(n)]
+
+
+class RealExecutorPositionTests(Base):
+    def test_the_live_view_lists_the_positions_of_the_project_only(self):
+        fake = AutoMT5()
+        self.send(fake)
+        fake.positions.append(NS(ticket=999, type=1, volume=1.0, price_open=1.0, sl=2.0, tp=0.5, profit=3.0, magic=1, symbol="X"))
+        fake.positions[0].profit = 12.34
+        fake.positions[0].price_current = 2001.5
+        rows = self.executor(fake).positions_snapshot()
+        self.assertEqual(len(rows), 1)  # a position with another magic number is not ours
+        row = rows[0]
+        self.assertEqual((row["ticket"], row["symbol"], row["side"], row["profit"], row["price_current"]), (777, "XAUUSD", "BUY", 12.34, 2001.5))
+        self.assertGreater(row["sl"], 0)
+        self.assertGreater(row["tp"], row["sl"])
+        self.assertEqual(fake.sent[-1]["magic"], MAGIC)
+        self.assertEqual(fake.calls[-1], "shutdown")
+
+    def test_one_position_can_be_closed_even_with_the_emergency_stop_and_an_unknown_one_is_left_alone(self):
+        fake = AutoMT5()
+        self.send(fake)
+        self.store.set_killed()
+        executor = self.executor(fake)
+        self.assertEqual(executor.close_position_by_ticket(self.store, 12345, reason="x")["status"], "not_open")
+        self.assertEqual(len(fake.sent), 1)
+        self.assertEqual(executor.close_position_by_ticket(self.store, 777, reason="close: skills:director says SELL")["status"], "sent")
+        self.assertEqual(len(fake.sent), 2)
+        self.assertIn("position", fake.sent[1])
+        self.assertIn("autopilot.closed_by_opposite_signal", self.kinds())
+
+    def test_close_all_closes_every_project_position_arms_the_stop_and_is_journaled(self):
+        fake = AutoMT5()
+        self.send(fake)
+        fake.positions.append(NS(ticket=555, type=1, volume=0.1, price_open=2000, sl=2010, tp=1990, profit=0, magic=MAGIC, symbol="XAUUSD"))
+        foreign = NS(ticket=999, type=1, volume=1.0, price_open=1.0, sl=2.0, tp=0.5, profit=0, magic=7, symbol="Y")
+        fake.positions.append(foreign)
+        self.assertFalse(self.store.killed())
+        result = self.executor(fake).close_all(self.store, author="op", now=utcnow())
+        self.assertEqual(len(result["closed"]), 2)
+        self.assertTrue(all(c["status"] == "sent" for c in result["closed"]))
+        self.assertEqual([p.ticket for p in fake.positions], [999])  # the foreign position is untouched
+        self.assertTrue(self.store.killed())
+        self.assertIn("autopilot.close_all", self.kinds())
+        again = self.executor(AutoMT5()).close_all(self.store, author="op", now=utcnow())  # nothing open: harmless
+        self.assertEqual(again["closed"], [])
+
+
+class OppositeSignalTests(unittest.TestCase):
+    def setUp(self):
+        self.folder = tempfile.TemporaryDirectory()
+        self.addCleanup(self.folder.cleanup)
+
+    def make(self, policy="ignore", side="SELL", profit=None):
+        executor = FakeExecutor()
+        store, pilot = WiringTests().make(self.folder.name, executor)  # det:graph is the execution arm and says BUY
+        autopilot.set_config(store, {"opposite_signal_policy": policy}, author="t")
+        autopilot.set_mode(store, "demo_auto", author="op", execution_available=True)
+        store.record_order(decision_id="live", symbol="XAUUSD", arm="det:graph", side=side, state="open", opened_at=NOW,
+                           volume=0.1, entry=100.0, stop_loss=95.0, take_profit=110.0, position_ticket=5, max_age_seconds=14400)
+        if profit is not None:
+            store.state_set("autopilot_positions", json.dumps({"at": NOW.isoformat(), "positions": [{"ticket": 5, "profit": profit}]}))
+        return store, pilot, executor
+
+    def test_an_opposite_signal_is_recorded_and_shown_and_never_reverses_the_position(self):
+        store, pilot, executor = self.make("ignore")
+        result = pilot.run_symbol("XAUUSD")
+        self.assertEqual(executor.sent, [])  # no opposite order in the same breath
+        self.assertEqual(executor.closed, [])
+        self.assertIn("BUY vs SELL: ignored", result["conflict"])
+        conflict = json.loads(store.state_get("autopilot_conflict:XAUUSD"))
+        self.assertEqual((conflict["signal"], conflict["position_side"], conflict["ticket"], conflict["action"]), ("BUY", "SELL", 5, "ignored"))
+        events = [e for e in store.journal.events(50) if e["kind"] == "autopilot.opposite_signal"]
+        self.assertEqual(len(events), 1)
+        view = Service(str(Path(self.folder.name) / "t.db")).positions_view()
+        self.assertEqual(view["positions"][0]["conflict"]["signal"], "BUY")
+
+    def test_the_same_direction_is_not_a_conflict_and_never_adds_a_second_position(self):
+        store, pilot, executor = self.make("close", side="BUY")
+        result = pilot.run_symbol("XAUUSD")
+        self.assertNotIn("conflict", result)
+        self.assertEqual((executor.sent, executor.closed), ([], []))
+        self.assertIsNone(store.state_get("autopilot_conflict:XAUUSD"))
+
+    def test_the_close_policy_closes_the_position_but_still_opens_nothing_opposite(self):
+        store, pilot, executor = self.make("close", profit=-8.0)
+        pilot.run_symbol("XAUUSD")
+        self.assertEqual([c[0] for c in executor.closed], [5])
+        self.assertEqual(executor.sent, [])
+        self.assertEqual(json.loads(store.state_get("autopilot_conflict:XAUUSD"))["action"], "closed")
+
+    def test_close_if_profit_takes_a_gain_and_leaves_a_loss_to_its_stop(self):
+        store, pilot, executor = self.make("close_if_profit", profit=15.5)
+        pilot.run_symbol("XAUUSD")
+        self.assertEqual([c[0] for c in executor.closed], [5])
+        with tempfile.TemporaryDirectory() as other:
+            executor2 = FakeExecutor()
+            store2, pilot2 = WiringTests().make(other, executor2)
+            autopilot.set_config(store2, {"opposite_signal_policy": "close_if_profit"}, author="t")
+            autopilot.set_mode(store2, "demo_auto", author="op", execution_available=True)
+            store2.record_order(decision_id="live", symbol="XAUUSD", arm="det:graph", side="SELL", state="open", opened_at=NOW,
+                                position_ticket=5)
+            store2.state_set("autopilot_positions", json.dumps({"at": NOW.isoformat(), "positions": [{"ticket": 5, "profit": -4.0}]}))
+            pilot2.run_symbol("XAUUSD")
+            self.assertEqual(executor2.closed, [])  # a losing position is never closed early by a signal
+            self.assertEqual(json.loads(store2.state_get("autopilot_conflict:XAUUSD"))["action"], "ignored")
+        with tempfile.TemporaryDirectory() as third:
+            executor3 = FakeExecutor()
+            store3, pilot3 = WiringTests().make(third, executor3)
+            autopilot.set_config(store3, {"opposite_signal_policy": "close_if_profit"}, author="t")
+            autopilot.set_mode(store3, "demo_auto", author="op", execution_available=True)
+            store3.record_order(decision_id="live", symbol="XAUUSD", arm="det:graph", side="SELL", state="open", opened_at=NOW,
+                                position_ticket=5)
+            pilot3.run_symbol("XAUUSD")  # no live profit known yet: never guess
+            self.assertEqual(executor3.closed, [])
+
+    def test_the_conflict_works_even_when_the_emergency_stop_is_active_and_the_policy_is_validated(self):
+        store, pilot, executor = self.make("close", profit=3.0)
+        store.set_killed()
+        pilot.run_symbol("XAUUSD")
+        self.assertEqual([c[0] for c in executor.closed], [5])  # closing only reduces risk
+        with self.assertRaises(ValueError):
+            autopilot.set_config(store, {"opposite_signal_policy": "reverse"}, author="t")
+
+    def test_a_conflict_belongs_to_its_own_position_only(self):
+        store, pilot, executor = self.make("ignore")
+        pilot.run_symbol("XAUUSD")
+        store.close_order("live", state="closed", profit=1.0, reason="stop", now=NOW)
+        store.record_order(decision_id="newer", symbol="XAUUSD", arm="det:graph", side="BUY", state="open", opened_at=NOW,
+                           position_ticket=6)
+        view = Service(str(Path(self.folder.name) / "t.db")).positions_view()
+        self.assertIsNone(view["positions"][0]["conflict"])
+
+
+class PositionsViewTests(unittest.TestCase):
+    def test_live_prices_time_left_and_floating_result_are_merged_from_the_pilots_snapshot(self):
+        with tempfile.TemporaryDirectory() as temp:
+            service = Service(str(Path(temp) / "t.db"))
+            store = service.store
+            opened = datetime.now(timezone.utc) - timedelta(minutes=30)
+            store.record_order(decision_id="a", symbol="XAUUSD", arm="skills:director", side="BUY", state="open", opened_at=opened,
+                               volume=0.16, entry=2000.0, stop_loss=1997.0, take_profit=2006.0, position_ticket=1, max_age_seconds=3600)
+            store.record_order(decision_id="b", symbol="Boom 500 Index", arm="ai:director", side="SELL", state="open", opened_at=opened,
+                               volume=2.5, entry=5600.0, stop_loss=5612.0, take_profit=5576.0, position_ticket=2)
+            self.assertFalse(service.positions_view()["positions"][0]["live"])  # no snapshot yet: shown, flagged not live
+            store.state_set("autopilot_positions", json.dumps({"at": utcnow().isoformat(), "positions": [
+                {"ticket": 1, "price_open": 2000.1, "price_current": 2002.0, "profit": 30.5},
+                {"ticket": 2, "price_open": 5600.0, "price_current": 5604.0, "profit": -10.0}]}))
+            view = service.positions_view()
+            rows = {r["symbol"]: r for r in view["positions"]}
+            self.assertEqual(rows["XAUUSD"]["price_current"], 2002.0)
+            self.assertTrue(rows["XAUUSD"]["live"])
+            self.assertAlmostEqual(rows["XAUUSD"]["seconds_left"], 1800, delta=5)
+            self.assertIsNone(rows["Boom 500 Index"]["seconds_left"])
+            self.assertEqual(view["floating_profit"], 20.5)
+            self.assertFalse(view["close_requested"])
+
+    def test_the_pilot_refreshes_the_snapshot_every_ten_seconds_only_while_a_position_is_open(self):
+        with tempfile.TemporaryDirectory() as temp:
+            clock = {"now": NOW}
+            from trading_pro.autopilot import Autopilot
+            store = ResearchStore(str(Path(temp) / "t.db"))
+            executor = FakeExecutor()
+            executor.positions = [{"ticket": 1, "profit": 5.0}]
+            pilot = Autopilot(store, fetch=lambda *a: ([], {}), clock=lambda: clock["now"], executor=executor)
+            pilot.refresh_positions()
+            self.assertEqual(executor.snapshots, 0)  # nothing open: no call to the terminal
+            store.record_order(decision_id="a", symbol="XAUUSD", arm="x", side="BUY", state="open", opened_at=NOW, position_ticket=1)
+            pilot.refresh_positions()
+            pilot.refresh_positions()
+            self.assertEqual(executor.snapshots, 1)
+            clock["now"] = NOW + timedelta(seconds=11)
+            pilot.refresh_positions()
+            self.assertEqual(executor.snapshots, 2)
+            self.assertEqual(json.loads(store.state_get("autopilot_positions"))["positions"][0]["profit"], 5.0)
+            store.close_order("a", state="closed", profit=5.0, reason="objectif", now=NOW)
+            pilot.refresh_positions()
+            self.assertEqual(json.loads(store.state_get("autopilot_positions"))["positions"], [])
+
+    def test_a_close_all_request_is_executed_once_by_the_pilot_thread_and_arms_the_stop(self):
+        with tempfile.TemporaryDirectory() as temp:
+            from trading_pro.autopilot import Autopilot
+            store = ResearchStore(str(Path(temp) / "t.db"))
+            store.release_killed(author="t", reason="test")
+            executor = FakeExecutor()
+            pilot = Autopilot(store, fetch=lambda *a: ([], {}), clock=lambda: NOW, executor=executor)
+            self.assertIsNone(pilot.handle_close_request())
+            store.state_set("autopilot_close_request", json.dumps({"author": "op"}))
+            self.assertTrue(Service(str(Path(temp) / "t.db")).positions_view()["close_requested"])
+            AutopilotRunner(pilot).tick()
+            self.assertEqual(executor.close_all_calls, ["op"])
+            self.assertTrue(store.killed())
+            AutopilotRunner(pilot).tick()
+            self.assertEqual(executor.close_all_calls, ["op"])  # consumed: never repeated
+
+    def test_the_close_all_endpoint_needs_the_key_the_phrase_and_the_bridge(self):
+        from test_autopilot import HttpAndProviderTests
+        from trading_pro.server import handler_factory
+        with tempfile.TemporaryDirectory() as temp:
+            service = Service(str(Path(temp) / "db.sqlite"))
+            call = HttpAndProviderTests().call
+
+            class Runner:
+                autopilot = NS(executor=None)
+                def start(self): pass
+            cls = handler_factory(service, "k", Runner())
+            phrase = json.dumps({"confirm": autopilot.CLOSE_ALL_PHRASE}).encode()
+            self.assertEqual(call(cls, "POST", "/autopilot/close-all", phrase)[0], 403)
+            self.assertEqual(call(cls, "POST", "/autopilot/close-all", b'{"confirm":"oui"}', key="k")[0], 409)
+            self.assertEqual(call(cls, "POST", "/autopilot/close-all", phrase, key="k")[0], 409)  # no bridge
+            self.assertFalse(service.store.state_get("autopilot_close_request"))
+            Runner.autopilot = NS(executor=object())
+            code, payload = call(cls, "POST", "/autopilot/close-all", phrase, key="k")
+            self.assertEqual((code, payload["requested"]), (200, True))
+            self.assertTrue(json.loads(service.store.state_get("autopilot_close_request")))
+            self.assertIn("autopilot.close_requested", [e["kind"] for e in service.store.journal.events(5)])
+            code, view = call(cls, "GET", "/autopilot/positions")
+            self.assertEqual((code, view["close_requested"]), (200, True))
 
 
 class WiringTests(unittest.TestCase):

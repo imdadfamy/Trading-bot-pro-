@@ -81,6 +81,23 @@ def handler_factory(service: Service, operator_key: str | None = None, runner=No
             if urlsplit(self.path).path == "/risk/kill-switch":
                 service.store.set_killed()
                 return self._json(200, {"killed": True})
+            if urlsplit(self.path).path == "/autopilot/close-all":
+                from . import autopilot
+                try:
+                    size = int(self.headers.get("Content-Length", "0"))
+                    if size <= 0 or size > 1024:
+                        return self._json(413, {"error": "Invalid request size"})
+                    body = json.loads(self.rfile.read(size))
+                    if body.get("confirm") != autopilot.CLOSE_ALL_PHRASE:
+                        return self._json(409, {"error": f"Confirmation phrase missing or wrong. Type exactly: {autopilot.CLOSE_ALL_PHRASE}"})
+                    if runner is None or runner.autopilot.executor is None:
+                        return self._json(409, {"error": "The MT5 execution bridge is unavailable in this process"})
+                    author = self.headers.get("X-Operator-Name", "local-operator")
+                    service.store.state_set("autopilot_close_request", json.dumps({"author": author}))
+                    service.store.journal.log("autopilot.close_requested", "global", {"author": author})
+                    return self._json(200, {"requested": True})
+                except (ValueError, TypeError, AttributeError, json.JSONDecodeError) as exc:
+                    return self._json(400, {"error": str(exc)})
             if urlsplit(self.path).path == "/autopilot/mode":
                 from . import autopilot
                 try:

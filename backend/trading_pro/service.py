@@ -135,6 +135,30 @@ class Service:
         self.store.journal.log("settings.changed", "settings", {"version": version, "author": author})
         return {"version": version}
 
+    def positions_view(self) -> dict:
+        """Open positions of the project: live prices from the pilot's snapshot, plan, time left, opposite-signal flag."""
+        from datetime import datetime, timezone
+        snap = json.loads(self.store.state_get("autopilot_positions") or "null") or {}
+        live = {p.get("ticket"): p for p in snap.get("positions", [])}
+        now = datetime.now(timezone.utc)
+        rows = []
+        for o in self.store.open_orders():
+            p = live.get(o["position_ticket"], {})
+            left = None
+            if o["max_age_seconds"]:
+                left = round(o["max_age_seconds"] - (now - datetime.fromisoformat(o["opened_at"])).total_seconds())
+            conflict = json.loads(self.store.state_get(f"autopilot_conflict:{o['symbol']}") or "null")
+            if conflict and conflict.get("ticket") != o["position_ticket"]:
+                conflict = None
+            rows.append({"symbol": o["symbol"], "arm": o["arm"], "side": o["side"], "volume": o["volume"],
+                         "entry": p.get("price_open", o["entry"]), "price_current": p.get("price_current"),
+                         "profit": p.get("profit"), "stop_loss": o["stop_loss"], "take_profit": o["take_profit"],
+                         "opened_at": o["opened_at"], "seconds_left": left, "max_age_seconds": o["max_age_seconds"],
+                         "live": bool(p), "conflict": conflict})
+        profits = [r["profit"] for r in rows if isinstance(r["profit"], (int, float))]
+        return {"at": snap.get("at"), "positions": rows, "floating_profit": round(sum(profits), 2) if profits else None,
+                "close_requested": bool(self.store.state_get("autopilot_close_request"))}
+
     def overview(self) -> dict:
         """One card per instrument: price, recent closes, pilot status, latest answers, open positions."""
         from . import autopilot
@@ -269,6 +293,8 @@ class Service:
             return autopilot.status(self.store)
         if path == "/autopilot/orders":
             return {"summary": self.store.order_summary(), "orders": self.store.orders()}
+        if path == "/autopilot/positions":
+            return self.positions_view()
         if path == "/autopilot/analyses":
             from . import autopilot_stats
             return autopilot_stats.recent_analyses(self.store)

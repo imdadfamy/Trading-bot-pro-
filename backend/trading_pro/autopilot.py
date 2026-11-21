@@ -40,7 +40,13 @@ DEFAULT_CONFIG = {
     "skill_pack_size": 3, "max_call_usd": 0.25,
     # Arms whose BUY/SELL becomes a real DEMO order when the mode is "demo_auto" (decisions of the first arm win).
     "execution_arms": ["skills:director"],
+    # What to do when an execution arm signals the OPPOSITE direction while a position of this project is open on the
+    # instrument: "ignore" (record and show it, the position keeps its stop and target), "close_if_profit" (take the gain)
+    # or "close". The opposite position is never opened in the same breath: no blind reversal.
+    "opposite_signal_policy": "ignore",
 }
+OPPOSITE_POLICIES = ("ignore", "close_if_profit", "close")
+CLOSE_ALL_PHRASE = "FERMER TOUTES LES POSITIONS DEMO"
 CONFIG_LIMITS = {"model_every_minutes": (5, 1440), "horizon_bars": (4, 500), "stop_atr_multiple": (0.5, 10),
                  "reward_multiple": (0.5, 10), "skill_pack_size": (0, 8), "max_call_usd": (0.01, 5), "bars": (100, 1000)}
 SPIKE_NAMES = ("boom", "crash", "jump", "dex")
@@ -95,6 +101,9 @@ def set_config(store: ResearchStore, patch: dict, *, author: str) -> dict:
             if (not isinstance(item, list) or not 1 <= len(item) <= 6
                     or any(not isinstance(s, str) or not 1 <= len(s) <= 60 for s in item)):
                 raise ValueError("symbols must be 1 to 6 instrument names")
+        elif key == "opposite_signal_policy":
+            if item not in OPPOSITE_POLICIES:
+                raise ValueError("opposite_signal_policy must be one of " + ", ".join(OPPOSITE_POLICIES))
         elif key == "execution_arms":
             if not isinstance(item, list) or len(item) > 6 or any(a not in ARM_NAMES for a in item):
                 raise ValueError("execution_arms must be a list of known arms, for example skills:director")
@@ -238,6 +247,7 @@ class Autopilot:
         self.fetch = fetch
         self.executor = executor
         self._last_account = None
+        self._last_positions = None
         self.limits_provider = limits_provider or Limits
         self.risk_provider = risk_provider or (lambda: {"fixed_lot": None, "commission_per_lot": 0.0, "slippage_ticks": 0.0})
         self.offset_hours = 0.0
@@ -499,15 +509,17 @@ class Autopilot:
     # -- automatic demo orders
     def _execute_arms(self, symbol, cycle_id, plan, step, config, summary, now) -> None:
         """Send the decision of the first execution arm that opened a BUY/SELL this cycle. One order per symbol."""
-        if self.store.killed():
-            summary["orders"] = {"all": "stopped"}  # the emergency stop is active: analysis goes on, no attempt is made
-            return
-        if any(o["symbol"] == symbol for o in self.store.open_orders()):
-            return  # a real position of the project is open on this instrument: it lives on its broker-side stop
         with self.store.journal.connect() as db:
             rows = {r["arm"]: dict(r) for r in db.execute(
                 "SELECT decision_id, arm, action, detail FROM decisions WHERE cycle_id=? "
                 "AND status IN ('open','skipped_open')", (cycle_id,))}
+        here = [o for o in self.store.open_orders() if o["symbol"] == symbol]
+        if here:  # a real position of the project is open on this instrument: it lives on its broker-side stop
+            self._opposite_signal(symbol, here[0], rows, config, summary, now)
+            return
+        if self.store.killed():
+            summary["orders"] = {"all": "stopped"}  # the emergency stop is active: analysis goes on, no attempt is made
+            return
         for arm in config.get("execution_arms", []):
             row = rows.get(arm)
             if row is None or row["action"] not in ("BUY", "SELL"):
@@ -533,6 +545,79 @@ class Autopilot:
             summary.setdefault("orders", {})[arm] = report["state"] + (f":{report['code']}" if report.get("code") else "")
             if report["state"] != "refused":
                 return
+
+    def _live_profit(self, ticket) -> float | None:
+        snap = json.loads(self.store.state_get("autopilot_positions") or "null") or {}
+        for p in snap.get("positions", []):
+            if p.get("ticket") == ticket:
+                return p.get("profit")
+        return None
+
+    def _opposite_signal(self, symbol, order, rows, config, summary, now) -> None:
+        """An execution arm says the opposite of the open position. Record it, show it, apply the chosen policy.
+
+        The position is never reversed in the same breath (no blind reversal); the opposite order, if the signal
+        persists, goes through every safeguard like any other once the position is gone.
+        """
+        for arm in config.get("execution_arms", []):
+            row = rows.get(arm)
+            if row is None or row["action"] not in ("BUY", "SELL") or row["action"] == order["side"]:
+                continue
+            key = f"autopilot_conflict:{symbol}"
+            previous = json.loads(self.store.state_get(key) or "null") or {}
+            profit = self._live_profit(order["position_ticket"])
+            conflict = {"at": now.isoformat(), "arm": arm, "signal": row["action"], "position_side": order["side"],
+                        "ticket": order["position_ticket"], "decision_id": row["decision_id"], "profit": profit,
+                        "policy": config.get("opposite_signal_policy", "ignore"), "action": "ignored"}
+            policy = conflict["policy"]
+            if (policy == "close" or (policy == "close_if_profit" and profit is not None and profit > 0)) \
+                    and self.executor is not None and order["position_ticket"]:
+                try:  # called from inside run_symbol, which already holds the pilot's lock (one MT5 user at a time)
+                    result = self.executor.close_position_by_ticket(
+                        self.store, int(order["position_ticket"]), reason=f"{policy}: {arm} says {row['action']}")
+                    conflict["action"] = "closed" if result.get("status") == "sent" else f"close_{result.get('status')}"
+                except Exception as exc:  # noqa: BLE001
+                    conflict["action"] = f"close_error:{type(exc).__name__}"
+            self.store.state_set(key, json.dumps(conflict))
+            if previous.get("decision_id") != row["decision_id"]:
+                self.store.journal.log("autopilot.opposite_signal", row["decision_id"],
+                                       {"symbol": symbol, "arm": arm, "signal": row["action"], "position": order["side"],
+                                        "profit": profit, "policy": policy, "action": conflict["action"]})
+            summary["conflict"] = f"{row['action']} vs {order['side']}: {conflict['action']}"
+            return
+
+    def refresh_positions(self, force: bool = False) -> None:
+        """Live view of the open positions for the interface (every ten seconds while any is open)."""
+        if self.executor is None:
+            return
+        now = self.clock()
+        if not self.store.open_orders():
+            if self.store.state_get("autopilot_positions"):
+                self.store.state_set("autopilot_positions", json.dumps({"at": now.isoformat(), "positions": []}))
+            return
+        if not force and self._last_positions is not None and (now - self._last_positions).total_seconds() < 10:
+            return
+        self._last_positions = now
+        with self._lock:
+            try:
+                positions = self.executor.positions_snapshot(self.offset_hours)
+            except Exception:  # noqa: BLE001 - the interface keeps its last values
+                return
+        self.store.state_set("autopilot_positions", json.dumps({"at": now.isoformat(), "positions": positions}))
+
+    def handle_close_request(self):
+        """Execute a 'close everything' request made from the interface (always in this thread: one MT5 user at a time)."""
+        if self.executor is None:
+            return None
+        raw = self.store.state_get("autopilot_close_request")
+        if not raw:
+            return None
+        self.store.state_set("autopilot_close_request", "")
+        request = json.loads(raw)
+        with self._lock:
+            result = self.executor.close_all(self.store, author=request.get("author", "operator"), now=self.clock())
+        self.refresh_positions(force=True)
+        return result
 
     def refresh_account(self) -> None:
         """Keep the account's capital and equity fresh for the dashboard (every five minutes, any mode)."""
@@ -699,6 +784,11 @@ class AutopilotRunner:
         store = self.autopilot.store
         now = self.autopilot.clock()
         self.autopilot.refresh_account()
+        try:
+            self.autopilot.handle_close_request()
+            self.autopilot.refresh_positions()
+        except Exception as exc:  # noqa: BLE001
+            store.journal.log("autopilot.error", "positions", {"error": type(exc).__name__, "message": str(exc)[:200]})
         if self.autopilot.executor is not None and (self._last_reconcile is None
                                                     or (now - self._last_reconcile).total_seconds() >= 60):
             self._last_reconcile = now

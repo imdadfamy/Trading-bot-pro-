@@ -89,7 +89,11 @@
     "autopilot.order_closed": "Position automatique clôturée (résultat enregistré)",
     "autopilot.order_uncertain": "Résultat d'ordre incertain : arrêt des entrées activé",
     "autopilot.position_unprotected": "Position sans protection : fermée, arrêt des entrées activé",
-    "alert.raised": "Alerte opérationnelle levée"
+    "alert.raised": "Alerte opérationnelle levée",
+    "autopilot.opposite_signal": "Signal contraire reçu pendant qu'une position est ouverte",
+    "autopilot.closed_by_opposite_signal": "Position fermée à cause d'un signal contraire",
+    "autopilot.close_requested": "Fermeture de toutes les positions demandée",
+    "autopilot.close_all": "Toutes les positions démo fermées (arrêt des entrées activé)"
   },
   "gates": {
     "broker_demo_verified": [

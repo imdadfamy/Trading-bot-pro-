@@ -163,6 +163,8 @@ function eventLook(kind) {
   if (kind.includes("order_closed")) return ["✓", "ok"];
   if (kind.includes("refused") || kind.includes("uncertain") || kind.includes("unprotected") || kind.startsWith("alert")) return ["!", "bad"];
   if (kind.includes("kill_switch")) return ["⛔", "bad"];
+  if (kind.includes("opposite")) return ["⇄", "bad"];
+  if (kind.includes("close_all") || kind.includes("close_requested")) return ["■", "bad"];
   if (kind.includes("mode_changed") || kind.includes("settings") || kind.includes("config")) return ["⚙", "info"];
   return ["•", ""];
 }
@@ -171,6 +173,8 @@ function eventDetail(e) {
   if (e.kind === "autopilot.mode_changed") return `${fr("values", p.from)} → ${fr("values", p.to)}`;
   if (e.kind === "autopilot.order_refused") return `${p.symbol || ""} · ${fr("refusals", p.code)}`;
   if (e.kind === "autopilot.order_closed") return `${p.symbol || ""} · ${signed(p.profit)} $ · sortie : ${p.reason || "—"}`;
+  if (e.kind === "autopilot.opposite_signal") return `${p.symbol || ""} · ${ACT_SHORT[p.signal] || p.signal} contre ${ACT_SHORT[p.position] || p.position} · ${POLICY_TEXT[p.policy] || p.policy} → ${CONFLICT_RESULT[p.action] || p.action}`;
+  if (e.kind === "autopilot.close_all") return `${p.positions ?? 0} position(s)`;
   if (e.kind === "autopilot.order_sent") return `${p.symbol || ""} · ${ACT_SHORT[p.side] || p.side} · ${value(p.volume)} lot`;
   if (e.kind === "autopilot.error" || e.kind === "autopilot.data_error") return (p.message || p.error || "").slice(0, 90);
   return "";
@@ -277,19 +281,21 @@ function pilotCard(pilot) {
   return panel;
 }
 const DEMO_PHRASE = "ACTIVER LES ORDRES AUTOMATIQUES DEMO";
+const CLOSE_PHRASE = "FERMER TOUTES LES POSITIONS DEMO";
 function openPilotDialog(target) {
   pilotTarget = target;
-  const titles = { observe: "Activer les agents (observation)", off: "Désactiver les agents", demo_auto: "Activer les ordres automatiques en démo" };
+  const titles = { observe: "Activer les agents (observation)", off: "Désactiver les agents", demo_auto: "Activer les ordres automatiques en démo", close_all: "Fermer toutes les positions" };
   const texts = {
     observe: "Les agents analyseront chaque nouvelle bougie en continu, jour et nuit, sans envoyer aucun ordre. Si des ordres automatiques étaient actifs, ils s'arrêtent : les positions déjà ouvertes gardent leur stop et leur objectif chez le courtier.",
     off: "Les agents s'arrêtent après le cycle en cours. Si des ordres automatiques étaient actifs, les nouvelles entrées s'arrêtent aussi ; les positions ouvertes gardent leur stop et leur objectif chez le courtier et restent suivies.",
+    close_all: "Toutes les positions ouvertes par les agents sont fermées au prix du marché, avec leur gain ou leur perte du moment. L'arrêt des nouvelles entrées est ensuite activé pour que rien ne se rouvre aussitôt ; il se lève avec « Reprendre les ordres ». Les positions que tu as ouvertes toi-même ne sont pas touchées.",
     demo_auto: "Les agents enverront eux-mêmes des ordres sur le compte DÉMO, sans confirmation à chaque ordre : un seul par instrument, stop et objectif chez le courtier, limites de risque et de perte du jour des paramètres. « Trading algo » doit être allumé dans MetaTrader (ton geste). L'arrêt d'urgence bloque aussitôt les nouvelles entrées. Aucun argent réel."
   };
   document.getElementById("pilot-title").textContent = titles[target];
   document.getElementById("pilot-text").textContent = texts[target];
   const phrase = document.getElementById("pilot-phrase-label");
-  phrase.hidden = target !== "demo_auto";
-  document.getElementById("pilot-phrase-hint").textContent = DEMO_PHRASE;
+  phrase.hidden = target !== "demo_auto" && target !== "close_all";
+  document.getElementById("pilot-phrase-hint").textContent = target === "close_all" ? CLOSE_PHRASE : DEMO_PHRASE;
   document.getElementById("pilot-phrase").value = "";
   document.getElementById("pilot-message").textContent = "";
   document.getElementById("pilot-dialog").showModal();
@@ -369,10 +375,47 @@ function decisionCard(list) {
     `${action(d.action)} · ${d.result ? `${fr("outcomes", d.result)} (${num(d.r_multiple)} R)` : fr("decisionStatus", d.status)}`])));
   return panel;
 }
+
+function duration(seconds) {
+  if (typeof seconds !== "number") return "—";
+  const s = Math.abs(Math.round(seconds)), h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
+  return (seconds < 0 ? "dépassé de " : "") + (h ? `${h} h ${String(m).padStart(2, "0")} min` : `${m} min`);
+}
+const POLICY_TEXT = { ignore: "ignorer (la position garde son stop)", close_if_profit: "fermer si la position est en gain", close: "fermer la position" };
+const CONFLICT_RESULT = { ignored: "ignoré", closed: "position fermée" };
+function positionsCard(data) {
+  const list = data.positions || [];
+  const panel = card("Positions ouvertes");
+  const head = node("div", "pos-head");
+  const total = typeof data.floating_profit === "number" ? `${signed(data.floating_profit)} $` : "—";
+  const left = node("div"); append(left, node("div", `big ${tone(data.floating_profit)}`, list.length ? `${list.length} position${list.length > 1 ? "s" : ""} · ${total}` : "Aucune position ouverte"),
+    node("div", "sub", list.length ? "Résultat en cours (non encore réalisé), lu chez le courtier toutes les 10 secondes. Chaque position a son stop et son objectif chez le courtier." : "Les ordres automatiques apparaissent ici dès qu'ils sont pris."));
+  const close = node("button", "danger wide", data.close_requested ? "Fermeture en cours…" : "Fermer toutes les positions");
+  close.type = "button"; close.disabled = !list.length || !!data.close_requested;
+  close.addEventListener("click", () => openPilotDialog("close_all"));
+  append(head, left, close); append(panel, head);
+  list.forEach(p => {
+    const item = node("div", "posn");
+    const who = node("div", "who"); append(who, node("strong", "", p.symbol), node("span", `chip ${p.side === "BUY" ? "buy" : "sell"}`, `${ACT_SHORT[p.side] || p.side} · ${value(p.volume)} lot`));
+    const first = node("div"); append(first, who, node("small", "", `${armName(p.arm)} · ouverte ${when(p.opened_at)}`));
+    const price = node("div"); append(price, node("div", "big", typeof p.price_current === "number" ? num(p.price_current) : "—"), node("small", "", `entrée ${num(p.entry)}${p.live ? "" : " · cours en attente"}`));
+    const gain = node("div"); append(gain, node("div", `big ${tone(p.profit)}`, typeof p.profit === "number" ? `${signed(p.profit)} $` : "—"), node("small", "", "résultat en cours"));
+    const levels = node("div"); append(levels, node("div", "levels", `stop ${num(p.stop_loss)} · objectif ${num(p.take_profit)}`),
+      node("small", "", p.seconds_left === null || p.seconds_left === undefined ? "pas de délai de fermeture" : (p.seconds_left < 0 ? `délai dépassé de ${duration(-p.seconds_left)} : fermeture au prochain contrôle` : `fermeture automatique dans ${duration(p.seconds_left)}`)));
+    if (typeof p.seconds_left === "number" && p.max_age_seconds) { const bar = node("div", "left"), fill = node("i"); setStyle(fill, { width: Math.max(0, Math.min(100, 100 - p.seconds_left / p.max_age_seconds * 100)) + "%" }); bar.appendChild(fill); levels.appendChild(bar); }
+    append(item, first, price, gain, levels);
+    if (p.conflict) {
+      const c = p.conflict;
+      append(item, node("div", "conflict", `Signal contraire reçu : ${ACT_SHORT[c.signal] || c.signal} (${armName(c.arm)}, ${when(c.at)}) alors que cette position est ${ACT_SHORT[c.position_side] || c.position_side}. Règle choisie : ${POLICY_TEXT[c.policy] || c.policy} → ${CONFLICT_RESULT[c.action] || c.action}. Aucune position inverse n'est ouverte en même temps.`));
+    }
+    append(panel, item);
+  });
+  return panel;
+}
 async function dashboard(sequence) {
   const query = chartSymbol ? `?symbol=${encodeURIComponent(chartSymbol)}` : "";
-  const [data, overview, history, pilot] = await Promise.all([get("/dashboard"), get("/market/overview").catch(() => ({ instruments: [] })),
-    get("/market/candles" + query), get("/autopilot").catch(() => null)]);
+  const [data, overview, history, pilot, positions] = await Promise.all([get("/dashboard"), get("/market/overview").catch(() => ({ instruments: [] })),
+    get("/market/candles" + query), get("/autopilot").catch(() => null), get("/autopilot/positions").catch(() => ({ positions: [] }))]);
   if (sequence !== renderSequence) return;
   if (pilot) updateModeBadge(pilot);
   const account = data.account, net = pilot && pilot.orders ? pilot.orders.net_profit : null;
@@ -387,6 +430,7 @@ async function dashboard(sequence) {
     tile("Agents", working ? (pilot.mode === "demo_auto" ? "ORDRES" : "AU TRAVAIL") : "ARRÊTÉS", working ? `${pilot.cycles} cycles · ${pilot.decisions_today} décisions aujourd'hui` : "activez-les ci-dessous", working ? "gain" : "idle"));
   append(content, tiles);
   if (pilot) append(content, pilotCard(pilot));
+  append(content, positionsCard(positions));
   const instruments = overview.instruments || [];
   const pick = symbol => { chartSymbol = symbol; render("Command Center"); };
   const heading = node("div", "section-title"); append(heading, node("h2", "", "Instruments suivis"), node("span", "", "un clic affiche ses bougies"));
@@ -510,12 +554,12 @@ function settingsPage() {
   get("/autopilot").then(state=>{
     const cfg=state.config||{};const fields={};
     const group=node("div","form-group");
-    for(const [field,label,type] of [["symbols","Instruments (séparés par des virgules)","text"],["timeframe","Durée des bougies (M1, M5, M15, M30, H1)","text"],["model_every_minutes","Consultation de l'IA toutes les (minutes)","number"],["horizon_bars","Durée maximale d'une position simulée (bougies)","number"],["stop_atr_multiple","Stop simulé (multiple de la volatilité ATR)","number"],["reward_multiple","Objectif simulé (multiple du risque)","number"],["skill_pack_size","Compétences données à chaque analyste","number"],["execution_arms","Méthodes dont les avis deviennent des ordres démo (séparées par des virgules ; ex. skills:director, forced:director, det:graph)","text"]]){
+    for(const [field,label,type] of [["symbols","Instruments (séparés par des virgules)","text"],["timeframe","Durée des bougies (M1, M5, M15, M30, H1)","text"],["model_every_minutes","Consultation de l'IA toutes les (minutes)","number"],["horizon_bars","Durée maximale d'une position simulée (bougies)","number"],["stop_atr_multiple","Stop simulé (multiple de la volatilité ATR)","number"],["reward_multiple","Objectif simulé (multiple du risque)","number"],["skill_pack_size","Compétences données à chaque analyste","number"],["execution_arms","Méthodes dont les avis deviennent des ordres démo (séparées par des virgules ; ex. skills:director, forced:director, det:graph)","text"],["opposite_signal_policy","Signal contraire pendant qu'une position est ouverte : ignore, close_if_profit (fermer si en gain) ou close (fermer)","text"]]){
       const current=Array.isArray(cfg[field])?cfg[field].join(", "):cfg[field];const [box,input]=formLabel(label,type,current);if(type==="number")input.step="any";fields[field]=input;append(group,box);
     }
     const save=node("button","","Enregistrer les réglages des agents");
     save.addEventListener("click",async()=>{
-      const patch={symbols:fields.symbols.value.split(",").map(s=>s.trim()).filter(Boolean),timeframe:fields.timeframe.value.trim(),execution_arms:fields.execution_arms.value.split(",").map(s=>s.trim()).filter(Boolean)};
+      const patch={symbols:fields.symbols.value.split(",").map(s=>s.trim()).filter(Boolean),timeframe:fields.timeframe.value.trim(),execution_arms:fields.execution_arms.value.split(",").map(s=>s.trim()).filter(Boolean),opposite_signal_policy:fields.opposite_signal_policy.value.trim()};
       for(const f of ["model_every_minutes","horizon_bars","stop_atr_multiple","reward_multiple","skill_pack_size"])patch[f]=Number(fields[f].value);
       try{await get("/autopilot/config",{method:"PATCH",headers:{"X-Operator-Key":keyInput.value,"X-Operator-Name":"preview-local","Content-Type":"application/json"},body:JSON.stringify(patch)});pilotNote.textContent="Réglages enregistrés (clé opérateur ci-dessus). Pris en compte au prochain cycle.";}catch(error){pilotNote.textContent=String(error);}
     });
@@ -556,7 +600,9 @@ const pilotDialog=document.getElementById("pilot-dialog"),pilotKey=document.getE
 document.getElementById("pilot-close").addEventListener("click",()=>{pilotKey.value="";pilotMessage.textContent="";pilotDialog.close();});
 document.getElementById("pilot-confirm").addEventListener("click",async()=>{
   try{
-    const result=await get("/autopilot/mode",{method:"POST",headers:{"X-Operator-Key":pilotKey.value,"X-Operator-Name":"preview-local","Content-Type":"application/json"},body:JSON.stringify({mode:pilotTarget,confirm:pilotTarget==="demo_auto"?document.getElementById("pilot-phrase").value:undefined})});
+    const phraseValue=document.getElementById("pilot-phrase").value,headers={"X-Operator-Key":pilotKey.value,"X-Operator-Name":"preview-local","Content-Type":"application/json"};
+    if(pilotTarget==="close_all"){await get("/autopilot/close-all",{method:"POST",headers,body:JSON.stringify({confirm:phraseValue})});pilotKey.value="";pilotMessage.textContent="";pilotDialog.close();render(active);return;}
+    const result=await get("/autopilot/mode",{method:"POST",headers,body:JSON.stringify({mode:pilotTarget,confirm:pilotTarget==="demo_auto"?phraseValue:undefined})});
     pilotKey.value="";pilotMessage.textContent="";pilotDialog.close();updateModeBadge(result.status);render(active);
   }catch(error){pilotMessage.textContent=`Erreur : ${String(error)}`;}
 });
