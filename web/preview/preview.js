@@ -73,6 +73,7 @@ let chartSymbol = null;
 
 function svgEl(tag, attrs) { const e = document.createElementNS("http://www.w3.org/2000/svg", tag); for (const [k, v] of Object.entries(attrs || {})) e.setAttribute(k, String(v)); return e; }
 function setStyle(el, props) { if (el && el.style) Object.assign(el.style, props); }
+const ACT_SHORT = { BUY: "ACHAT", SELL: "VENTE", WAIT: "ATTENTE" };
 const FAMILY = { gold: "OR", volatility: "VOLATILITÉ", boom: "BOOM", crash: "CRASH", drift: "DRIFT" };
 const STATUS_DOT = { ok: "live", no_new_bar: "live", halted: "warn", stale: "warn", waiting: "", data_error: "bad" };
 const STATUS_TEXT = { ok: "analyse à jour", no_new_bar: "analyse à jour", halted: "annonce américaine : prudence", stale: "marché fermé ou données anciennes", waiting: "pas encore analysé", data_error: "données indisponibles" };
@@ -116,9 +117,9 @@ function instrumentCard(inst, selected, onPick) {
     append(chips, voteChip(label, (inst.votes || {})[key]));
   });
   const foot = node("div", "i-foot");
-  const real = (inst.real_positions || []).map(p => `${action(p.side)} ${value(p.volume)} lot`).join(" · ");
+  const real = (inst.real_positions || []).map(p => `${ACT_SHORT[p.side] || p.side} ${value(p.volume)} lot`).join(" · ");
   foot.textContent = `${STATUS_TEXT[inst.status] || inst.status} · ${inst.timeframe}${inst.session ? ` · ${fr("sessions", inst.session)}` : ""}` +
-    (inst.shadow_open ? ` · ${inst.shadow_open} position(s) simulée(s)` : "") + (real ? ` · ORDRE DÉMO : ${real}` : "");
+    (inst.shadow_open ? ` · ${inst.shadow_open} position(s) simulée(s)` : "") + (real ? ` · ORDRE DÉMO OUVERT : ${real}` : "");
   append(button, head, price, (inst.closes || []).length > 1 ? sparkline(inst.closes, (inst.change_pct || 0) >= 0) : node("div", "spark-empty", "en attente des premières bougies"), chips, foot);
   button.addEventListener("click", () => onPick(inst.symbol));
   return button;
@@ -166,7 +167,7 @@ function eventDetail(e) {
   if (e.kind === "autopilot.mode_changed") return `${fr("values", p.from)} → ${fr("values", p.to)}`;
   if (e.kind === "autopilot.order_refused") return `${p.symbol || ""} · ${fr("refusals", p.code)}`;
   if (e.kind === "autopilot.order_closed") return `${p.symbol || ""} · ${signed(p.profit)} $ · sortie : ${p.reason || "—"}`;
-  if (e.kind === "autopilot.order_sent") return `${p.symbol || ""} · ${action(p.side)} · ${value(p.volume)} lot`;
+  if (e.kind === "autopilot.order_sent") return `${p.symbol || ""} · ${ACT_SHORT[p.side] || p.side} · ${value(p.volume)} lot`;
   if (e.kind === "autopilot.error" || e.kind === "autopilot.data_error") return (p.message || p.error || "").slice(0, 90);
   return "";
 }
@@ -292,7 +293,7 @@ function performanceCards(perf) {
   append(arms, info("Chaque avis « achat » ou « vente » ouvre une position simulée sur les vraies bougies suivantes (écart d'achat-vente inclus). R = gain ou perte exprimé en multiple du risque initial. Peu de positions ne prouvent rien : deux semaines servent de diagnostic."));
   if (!names.length) append(arms, empty("Aucune décision enregistrée. Activez les agents depuis la Vue d'ensemble."));
   names.forEach(arm => { const a = perf.arms[arm];
-    append(arms, barRow(armName(arm), `${a.trades} positions · R moyen ${num(a.mean_r)} · réussite ${pct(a.win_rate)} · abstention ${pct(a.abstention_rate)}${a.model_failures ? ` · ${a.model_failures} appels IA en échec` : ""}`, a, barScale(perf.arms), perfBadge(a))); });
+    append(arms, barRow(armName(arm), `${a.trades} position${a.trades > 1 ? "s" : ""} · R moyen ${num(a.mean_r)} · réussite ${pct(a.win_rate)} · abstention ${pct(a.abstention_rate)}${a.model_failures ? ` · ${a.model_failures} appels IA en échec` : ""}`, a, barScale(perf.arms), perfBadge(a))); });
   out.push(arms);
   const skills = card("Les compétences aident-elles ?");
   const agents = Object.entries(perf.skills_vs_plain || {});
@@ -309,7 +310,7 @@ function performanceCards(perf) {
   append(direction, info("Pour chaque avis d'achat ou de vente d'un cycle d'analyse, on mesure le mouvement du prix après un délai égal à l'intervalle entre deux consultations de l'IA, en distances de stop et après l'écart d'achat-vente. Sans position bloquée, ces observations sont bien plus nombreuses que les positions simulées."));
   const dirNames = Object.keys(dir.arms || {});
   if (!dirNames.length) append(direction, empty("Aucune observation mesurée pour l'instant (premiers résultats après un délai d'analyse)."));
-  dirNames.forEach(arm => { const a = dir.arms[arm]; append(direction, barRow(armName(arm), `${a.trades} observations · mouvement moyen ${num(a.mean_r)} · direction juste ${pct(a.win_rate)}`, a, barScale(dir.arms), perfBadge(a))); });
+  dirNames.forEach(arm => { const a = dir.arms[arm]; append(direction, barRow(armName(arm), `${a.trades} observation${a.trades > 1 ? "s" : ""} · mouvement moyen ${num(a.mean_r)} · direction juste ${pct(a.win_rate)}`, a, barScale(dir.arms), perfBadge(a))); });
   out.push(direction);
   const forced = card("La direction forcée bat-elle la pièce de monnaie ?");
   append(forced, info("Variante de recherche : l'analyste doit choisir achat ou vente à chaque cycle. On la compare à un tirage à pile ou face, la référence du hasard. Un résultat n'est crédible qu'avec au moins 30 positions et un écart dont l'intervalle reste au-dessus de zéro."));
@@ -367,8 +368,8 @@ async function dashboard(sequence) {
   const working = pilot && pilot.alive && pilot.mode !== "off";
   const tiles = node("div", "tiles");
   append(tiles,
-    tile("Capital du compte démo", account ? `${num(account.balance)} ${account.currency || ""}` : "—", account ? `lu à ${when(account.at)}` : "visible quand le serveur lit MetaTrader"),
-    tile("Valeur du compte (équité)", account ? `${num(account.equity)} ${account.currency || ""}` : "—", delta === null ? "—" : `${signed(delta)} ${account.currency || ""} de positions ouvertes`, delta > 0 ? "gain" : delta < 0 ? "loss" : "", tone(delta)),
+    tile(`Capital du compte démo${account && account.currency ? ` (${account.currency})` : ""}`, account ? num(account.balance) : "—", account ? `lu à ${when(account.at)}` : "visible quand le serveur lit MetaTrader"),
+    tile(`Équité du compte${account && account.currency ? ` (${account.currency})` : ""}`, account ? num(account.equity) : "—", delta === null ? "—" : `${signed(delta)} ${account.currency || ""} de positions ouvertes`, delta > 0 ? "gain" : delta < 0 ? "loss" : "", tone(delta)),
     tile("Résultat des ordres démo", net === null ? "—" : `${signed(net)} $`, pilot && pilot.orders && pilot.orders.closed ? `${pilot.orders.closed} ordres clôturés` : "aucun ordre clôturé", net > 0 ? "gain" : net < 0 ? "loss" : "", tone(net)),
     tile("Coût IA du jour", `${num(data.costs?.today_usd)} $`, `total depuis le début : ${num(data.costs?.total_usd)} $`),
     tile("Agents", working ? (pilot.mode === "demo_auto" ? "ORDRES" : "AU TRAVAIL") : "ARRÊTÉS", working ? `${pilot.cycles} cycles · ${pilot.decisions_today} décisions aujourd'hui` : "activez-les ci-dessous", working ? "gain" : "idle"));
@@ -388,9 +389,9 @@ async function dashboard(sequence) {
     const title = id === "ai_director" ? armName("ai:director") : id === "director" ? "Directeur par vote" : role(id);
     const help = id === "ai_director" ? "Lit tous les rapports de la consultation" : id === "director" ? "Vote : deux analystes d'accord" : fr("roleHelp", id);
     const item = node("div", "vote"), left = node("div");
-    append(left, node("div", "", `${n} · ${title}`), node("small", "", help));
+    append(left, node("div", "", `${n} · ${title}`), node("small", "", vote ? `${help} · ${vote.symbol}` : help));
     const kind = vote ? (vote.action === "BUY" ? "buy" : vote.action === "SELL" ? "sell" : "wait") : "";
-    append(item, left, node("span", `chip ${kind}`, id === "risk" ? "VETO PAR LE CODE" : vote ? `${action(vote.action)} · ${vote.symbol}` : "AUCUN CYCLE"));
+    append(item, left, node("span", `chip ${kind}`, id === "risk" ? "VETO PAR LE CODE" : vote ? ACT_SHORT[vote.action] || vote.action : "AUCUN CYCLE"));
     append(agents, item);
   });
   append(content, grid("two", candleChart(history, history.symbols || [], pick), agents));

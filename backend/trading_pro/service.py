@@ -59,11 +59,16 @@ class Service:
         quote = self.store.latest_snapshot()
         status = autopilot.status(self.store)
         events = [e for e in self.store.journal.events(400) if e["kind"] not in self.NOISY_EVENTS][:30]
-        return {"mode": status["mode"], "broker": "connected" if status["alive"] else "disconnected",
+        account = json.loads(self.store.state_get("autopilot_account") or "null")
+        fresh_account = False
+        if account and account.get("at"):  # the account was read from MetaTrader in the last ten minutes
+            from datetime import datetime, timezone
+            fresh_account = (datetime.now(timezone.utc) - datetime.fromisoformat(account["at"])).total_seconds() < 600
+        return {"mode": status["mode"], "broker": "connected" if (status["alive"] or fresh_account) else "disconnected",
                 "kill_switch": self.store.killed(), "symbol": (quote or {}).get("symbol"), "live_trading": False,
                 "snapshot": quote, "pending_order_intents": len(self.store.journal.pending_intents()),
                 "agents": ["graph", "news", "quant", "risk", "director"], "events": events,
-                "account": json.loads(self.store.state_get("autopilot_account") or "null"),
+                "account": account,
                 "latest_votes": self.latest_votes(),
                 "decisions_total": sum(status["decisions_by_status"].values()),
                 "signal_count": len(self.store.recent("signals", 500)), "costs": self.store.costs()}

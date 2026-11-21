@@ -56,7 +56,7 @@ html{scrollbar-gutter:stable}
 @media(max-width:700px){.t-value{font-size:23px}.inst-grid{grid-template-columns:1fr}}
 
 .vote{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:11px 0;border-top:1px solid var(--line);font-size:12px;line-height:1.4}
-.vote:first-of-type{border-top:0}.vote small{display:block;color:var(--muted)}.vote .chip{font-size:11px;padding:4px 9px}
+.vote:first-of-type{border-top:0}.vote small{display:block;color:var(--muted)}.vote .chip{font-size:11px;padding:4px 9px;flex:0 0 auto}.vote>div{flex:1 1 auto;min-width:0}
 .card .stats{grid-template-columns:repeat(auto-fit,minmax(130px,1fr))}
 .spark-empty{height:54px;display:grid;place-items:center;color:#6d6d77;font-size:11px;border:1px dashed #2f2f36;border-radius:8px}
 details.more{margin-top:14px}details.more summary{cursor:pointer;color:var(--gold);font-size:12px;padding:6px 0}
