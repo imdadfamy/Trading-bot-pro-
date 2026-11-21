@@ -367,6 +367,23 @@ class WiringTests(unittest.TestCase):
             pilot2.run_symbol("XAUUSD")
             self.assertEqual(len(executor.sent), 1)
 
+    def test_while_the_emergency_stop_is_active_nothing_is_attempted_nothing_is_logged_and_analysis_goes_on(self):
+        with tempfile.TemporaryDirectory() as temp:
+            executor = FakeExecutor()
+            store, pilot = self.make(temp, executor)
+            autopilot.set_mode(store, "demo_auto", author="op", execution_available=True)
+            store.set_killed()  # the red button
+            result = pilot.run_symbol("XAUUSD")
+            self.assertEqual(result["status"], "ok")
+            self.assertEqual(executor.sent, [])
+            self.assertEqual(result["orders"], {"all": "stopped"})
+            self.assertEqual(store.orders(), [])  # no "refused" row per cycle
+            self.assertEqual(autopilot.get_mode(store), "demo_auto")  # the mode is untouched: only a deliberate act resumes
+            with store.journal.connect() as db:
+                self.assertGreater(db.execute("SELECT COUNT(*) FROM decisions").fetchone()[0], 0)
+            autopilot.set_mode(store, "demo_auto", author="op", execution_available=True)  # "Reprendre les ordres"
+            self.assertFalse(store.killed())
+
     def test_a_refused_order_does_not_stop_the_analysis_and_an_exception_is_contained(self):
         with tempfile.TemporaryDirectory() as temp:
             executor = FakeExecutor(state="refused")

@@ -6,7 +6,11 @@ const endpoints = {
   "AI Memory":"/memory","Risk Center":"/dashboard","API & Integrations":"/readiness","Budget Center":"/costs"
 };
 const nav = document.getElementById("navigation");
-const content = document.getElementById("content");
+const liveContent = document.getElementById("content");
+// During a refresh of the page already on screen, content points to an offscreen stage and the old content stays
+// visible until the new one is complete: the page never collapses, blinks or jumps while data reloads.
+let content = liveContent;
+let loadedPage = null;
 const notice = document.getElementById("notice");
 let active = "Command Center";
 let renderSequence = 0;
@@ -235,7 +239,9 @@ function pilotCard(pilot) {
   append(strip, node("span", `dot ${on ? (silent ? "warn" : "live") : ""}`), node("strong", "", auto ? "DÉMO AUTOMATIQUE" : on ? "EN OBSERVATION" : "ARRÊTÉS"),
     node("span", "sub", `arrêt des nouvelles entrées : ${pilot.kill_switch ? "ACTIF" : "levé"}`));
   append(panel, strip);
-  append(panel, info(auto
+  append(panel, info(auto && pilot.kill_switch
+    ? "ARRÊT D'URGENCE ACTIF : le pilote analyse toujours, mais aucune nouvelle entrée n'est tentée. Les positions déjà ouvertes gardent leur stop et leur objectif chez le courtier et restent suivies. Pour reprendre, clique sur « Reprendre les ordres »."
+    : auto
     ? (silent ? "Ordres automatiques activés mais aucun signe de vie récent : le serveur local a peut-être été arrêté. Les positions ouvertes gardent leur stop chez le courtier."
               : "Les agents travaillent ET envoient des ordres sur le compte DÉMO (jamais de l'argent réel) : un seul par instrument, avec stop et objectif chez le courtier, dans les limites de risque des paramètres. « Trading algo » doit rester allumé dans MetaTrader.")
     : on
@@ -253,6 +259,12 @@ function pilotCard(pilot) {
   second.title = pilot.demo_auto_reason || "";
   second.addEventListener("click", () => openPilotDialog(auto ? "observe" : "demo_auto"));
   append(actions, second);
+  if (auto && pilot.kill_switch) {
+    const resume = node("button", "", "Reprendre les ordres (lever l'arrêt)");
+    resume.type = "button";
+    resume.addEventListener("click", () => openPilotDialog("demo_auto"));
+    append(actions, resume);
+  }
   append(panel, actions);
   const more = node("details", "more");
   append(more, node("summary", "", "Détails du pilote"));
@@ -513,15 +525,24 @@ function settingsPage() {
 }
 async function render(page) {
   const sequence=++renderSequence;
+  const refresh=page===loadedPage&&liveContent.children.length>0;
   active=page;document.getElementById("title").textContent=labels[page];
   document.getElementById("breadcrumb").textContent=`PLATEFORME / ${labels[page].toUpperCase()}`;
   if(page!=="Command Center")document.getElementById("subtitle").textContent="Compte démo uniquement · aucun argent réel.";
   [...nav.children].forEach(button=>{const selected=button.dataset.page===page;button.classList.toggle("active",selected);button.setAttribute("aria-current",selected?"page":"false");});
-  content.replaceChildren();notice.replaceChildren();
-  if(page==="Settings"){settingsPage();return;}
-  const placeholder=node("div","loading-panel","Chargement des données locales…");append(content,placeholder);
-  try{await ensureLabels();if(page==="Command Center")await dashboard(sequence);else await generic(page,sequence);if(sequence===renderSequence)placeholder.remove();}
-  catch(error){if(sequence!==renderSequence)return;content.replaceChildren();append(notice,info(`API indisponible : ${String(error)}. Vérifiez le serveur local.`,true));}
+  const stage=refresh?node("div"):null;
+  content=refresh?stage:liveContent;
+  if(!refresh){liveContent.replaceChildren();notice.replaceChildren();if(typeof window!=="undefined"&&window.scrollTo)window.scrollTo(0,0);}
+  const finish=()=>{
+    if(sequence!==renderSequence)return;
+    if(refresh){const y=typeof window!=="undefined"?window.scrollY:0;notice.replaceChildren();liveContent.replaceChildren(...[...stage.children]);if(typeof window!=="undefined"&&window.scrollTo)window.scrollTo(0,y);}
+    content=liveContent;loadedPage=page;
+  };
+  if(page==="Settings"){settingsPage();finish();return;}
+  const placeholder=refresh?null:node("div","loading-panel","Chargement des données locales…");
+  if(placeholder)append(content,placeholder);
+  try{await ensureLabels();if(page==="Command Center")await dashboard(sequence);else await generic(page,sequence);if(sequence===renderSequence&&placeholder)placeholder.remove();finish();}
+  catch(error){if(sequence!==renderSequence)return;content=liveContent;if(!refresh)liveContent.replaceChildren();notice.replaceChildren();append(notice,info(`API indisponible : ${String(error)}. Vérifiez le serveur local.`,true));}
 }
 pages.forEach(page=>{const button=node("button","",labels[page]);button.type="button";button.dataset.page=page;button.addEventListener("click",()=>render(page));append(nav,button);});
 const dialog=document.getElementById("stop-dialog"),stopKey=document.getElementById("stop-key"),stopMessage=document.getElementById("stop-message");

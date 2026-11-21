@@ -499,6 +499,9 @@ class Autopilot:
     # -- automatic demo orders
     def _execute_arms(self, symbol, cycle_id, plan, step, config, summary, now) -> None:
         """Send the decision of the first execution arm that opened a BUY/SELL this cycle. One order per symbol."""
+        if self.store.killed():
+            summary["orders"] = {"all": "stopped"}  # the emergency stop is active: analysis goes on, no attempt is made
+            return
         if any(o["symbol"] == symbol for o in self.store.open_orders()):
             return  # a real position of the project is open on this instrument: it lives on its broker-side stop
         with self.store.journal.connect() as db:
