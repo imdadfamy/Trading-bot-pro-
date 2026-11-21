@@ -61,3 +61,8 @@ html{scrollbar-gutter:stable}
 .spark-empty{height:54px;display:grid;place-items:center;color:#6d6d77;font-size:11px;border:1px dashed #2f2f36;border-radius:8px}
 details.more{margin-top:14px}details.more summary{cursor:pointer;color:var(--gold);font-size:12px;padding:6px 0}
 .pilot-strip strong{letter-spacing:.6px}
+/* No rubber band: the page does not stretch, bounce or peel away at its edges, vertically or sideways, and a swipe
+   at the edge does not trigger the browser's back/forward or pull-to-refresh gestures. */
+html{background:#09090b;overscroll-behavior:none;overflow-x:clip}
+body{overscroll-behavior:none;overflow-x:clip;min-height:100vh}
+.sidebar,.sidebar nav,dialog,textarea,.card{overscroll-behavior:contain}

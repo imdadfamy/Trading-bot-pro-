@@ -191,6 +191,12 @@ class OverviewTests(unittest.TestCase):
             empty = cards["Crash 500 Index"]
             self.assertEqual((empty["closes"], empty["price"], empty["change_pct"], empty["votes"]), ([], None, None, {}))
 
+    def test_the_page_never_stretches_or_bounces_at_its_edges(self):
+        css = (ROOT / "web" / "preview" / "preview.css").read_text(encoding="utf-8")
+        self.assertIn("html{background:#09090b;overscroll-behavior:none;overflow-x:clip}", css)
+        self.assertIn("body{overscroll-behavior:none;overflow-x:clip", css)
+        self.assertNotIn("overscroll-behavior:auto", css)
+
     def test_the_interface_files_are_there_and_the_removed_app_is_not(self):
         web = ROOT / "web"
         for name in ("index.html", "preview.js", "preview.css", "labels.json"):
