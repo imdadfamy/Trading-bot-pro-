@@ -71,6 +71,12 @@ function grid(kind,...items) { const result=node("div",`grid ${kind}`); append(r
 function stat(label,number,detail) { const result=card(""); result.firstChild.remove(); append(result,node("div","label",label),node("div","metric",number),node("div","sub",detail)); return result; }
 function info(text,warning=false) { return node("div",warning?"warn":"info",text); }
 function labeled(container, values) { const section=node("div","stats"); for (const [label,actual] of Object.entries(values)) { const item=node("div","stat"); append(item,node("span","label",label.replaceAll("_"," ")),node("strong","",value(actual))); append(section,item); } append(container,section); }
+function friendly(error) {
+  const text = String(error && error.message ? error.message : error);
+  if (text.includes("Operator authentication")) return "Clé opérateur manquante ou incorrecte : copie-la depuis la fenêtre noire ouverte par Lancer-Application.bat (elle change à chaque lancement) et colle-la dans le champ « Clé opérateur ».";
+  if (text.includes("Confirmation phrase")) return "Phrase de confirmation absente ou fausse : recopie-la exactement.";
+  return text;
+}
 async function get(path, options) { const response=await fetch(path,{cache:"no-store",...options}); const result=await response.json(); if(!response.ok) throw new Error(result.error || `HTTP ${response.status}`); return result; }
 function freshness(snapshot) { if(!snapshot) return "Aucune cotation"; const time=Date.parse(snapshot.observed_at); if(!Number.isFinite(time)) return "Horodatage invalide"; const age=Math.round((Date.now()-time)/1000); return age < 0 ? "Horloge incohérente" : `${age} s depuis la clôture enregistrée`; }
 let chartSymbol = null;
@@ -552,6 +558,9 @@ function settingsPage() {
     }catch(error){status.textContent=String(error);}
   });append(form,keyLabel,load,status,controls);append(panel,form);append(content,panel);
   const pilotPanel=card("Réglages des agents automatiques");const pilotForm=node("div","form");const pilotNote=node("div","form-note");
+  const [agentKeyLabel,agentKey]=formLabel("Clé opérateur (affichée dans la fenêtre noire)","password","");agentKey.autocomplete="off";
+  keyInput.addEventListener("input",()=>{agentKey.value=keyInput.value;});agentKey.addEventListener("input",()=>{keyInput.value=agentKey.value;});
+  append(pilotForm,agentKeyLabel);
   get("/autopilot").then(state=>{
     const cfg=state.config||{};const fields={};
     const group=node("div","form-group");
@@ -562,7 +571,7 @@ function settingsPage() {
     save.addEventListener("click",async()=>{
       const patch={symbols:fields.symbols.value.split(",").map(s=>s.trim()).filter(Boolean),timeframe:fields.timeframe.value.trim(),execution_arms:fields.execution_arms.value.split(",").map(s=>s.trim()).filter(Boolean),opposite_signal_policy:fields.opposite_signal_policy.value.trim()};
       for(const f of ["model_every_minutes","horizon_bars","stop_atr_multiple","reward_multiple","skill_pack_size"])patch[f]=Number(fields[f].value);
-      try{await get("/autopilot/config",{method:"PATCH",headers:{"X-Operator-Key":keyInput.value,"X-Operator-Name":"preview-local","Content-Type":"application/json"},body:JSON.stringify(patch)});pilotNote.textContent="Réglages enregistrés (clé opérateur ci-dessus). Pris en compte au prochain cycle.";}catch(error){pilotNote.textContent=String(error);}
+      try{await get("/autopilot/config",{method:"PATCH",headers:{"X-Operator-Key":agentKey.value||keyInput.value,"X-Operator-Name":"preview-local","Content-Type":"application/json"},body:JSON.stringify(patch)});pilotNote.textContent="Réglages enregistrés. Ils sont pris en compte au prochain cycle d'analyse.";}catch(error){pilotNote.textContent=friendly(error);}
     });
     append(pilotForm,group,save,pilotNote);
   }).catch(()=>append(pilotForm,empty("Réglages indisponibles : serveur local non joint.")));
@@ -595,7 +604,7 @@ document.getElementById("stop-open").addEventListener("click",()=>dialog.showMod
 document.getElementById("stop-close").addEventListener("click",()=>{stopKey.value="";stopMessage.textContent="";dialog.close();});
 document.getElementById("stop-confirm").addEventListener("click",async()=>{
   try{await get("/risk/kill-switch",{method:"POST",headers:{"X-Operator-Key":stopKey.value}});stopMessage.textContent="Arrêt enregistré. Vérifiez séparément le worker avant la démo.";stopKey.value="";}
-  catch(error){stopMessage.textContent=`Erreur : ${String(error)}`;}
+  catch(error){stopMessage.textContent=`Erreur : ${friendly(error)}`;}
 });
 const pilotDialog=document.getElementById("pilot-dialog"),pilotKey=document.getElementById("pilot-key"),pilotMessage=document.getElementById("pilot-message");
 document.getElementById("pilot-close").addEventListener("click",()=>{pilotKey.value="";pilotMessage.textContent="";pilotDialog.close();});
@@ -605,7 +614,7 @@ document.getElementById("pilot-confirm").addEventListener("click",async()=>{
     if(pilotTarget==="close_all"){await get("/autopilot/close-all",{method:"POST",headers,body:JSON.stringify({confirm:phraseValue})});pilotKey.value="";pilotMessage.textContent="";pilotDialog.close();render(active);return;}
     const result=await get("/autopilot/mode",{method:"POST",headers,body:JSON.stringify({mode:pilotTarget,confirm:pilotTarget==="demo_auto"?phraseValue:undefined})});
     pilotKey.value="";pilotMessage.textContent="";pilotDialog.close();updateModeBadge(result.status);render(active);
-  }catch(error){pilotMessage.textContent=`Erreur : ${String(error)}`;}
+  }catch(error){pilotMessage.textContent=`Erreur : ${friendly(error)}`;}
 });
 if(typeof setInterval==="function")setInterval(()=>{if(active==="Command Center"&&!document.hidden&&!pilotDialog.open&&!document.getElementById("stop-dialog").open)render(active);},30000);
 render("Command Center");

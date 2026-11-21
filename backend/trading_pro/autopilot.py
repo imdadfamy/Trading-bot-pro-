@@ -98,9 +98,9 @@ def set_config(store: ResearchStore, patch: dict, *, author: str) -> dict:
         if key not in DEFAULT_CONFIG:
             raise ValueError(f"Unknown setting: {key}")
         if key == "symbols":
-            if (not isinstance(item, list) or not 1 <= len(item) <= 6
+            if (not isinstance(item, list) or not 1 <= len(item) <= 12
                     or any(not isinstance(s, str) or not 1 <= len(s) <= 60 for s in item)):
-                raise ValueError("symbols must be 1 to 6 instrument names")
+                raise ValueError("symbols must be 1 to 12 instrument names")
         elif key == "opposite_signal_policy":
             if item not in OPPOSITE_POLICIES:
                 raise ValueError("opposite_signal_policy must be one of " + ", ".join(OPPOSITE_POLICIES))

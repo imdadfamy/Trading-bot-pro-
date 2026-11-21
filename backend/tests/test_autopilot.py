@@ -431,6 +431,21 @@ class ModeAndRunnerTests(unittest.TestCase):
             self.assertIn("calendar exploded", status["last_error"])
             self.assertTrue(decisions(store, symbol="Volatility 75 Index"))
 
+    def test_the_form_can_always_save_back_the_default_instruments(self):
+        with tempfile.TemporaryDirectory() as temp:
+            store = ResearchStore(str(Path(temp) / "t.db"))
+            defaults = autopilot.get_config(store)
+            # what the settings form sends when only one field was changed: every field, defaults included
+            patch = {k: defaults[k] for k in ("symbols", "timeframe", "model_every_minutes", "horizon_bars", "stop_atr_multiple",
+                                              "reward_multiple", "skill_pack_size", "opposite_signal_policy")}
+            patch["execution_arms"] = ["forced:director"]
+            saved = autopilot.set_config(store, patch, author="op")
+            self.assertEqual(saved["execution_arms"], ["forced:director"])
+            self.assertEqual(saved["symbols"], defaults["symbols"])
+            self.assertGreater(len(defaults["symbols"]), 6)
+            with self.assertRaises(ValueError):
+                autopilot.set_config(store, {"symbols": [f"S{i}" for i in range(13)]}, author="op")
+
     def test_config_changes_are_validated_and_journaled(self):
         with tempfile.TemporaryDirectory() as temp:
             store = ResearchStore(str(Path(temp) / "t.db"))

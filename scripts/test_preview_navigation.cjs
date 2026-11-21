@@ -77,6 +77,9 @@ async function run() {
   await home;
   assert.doesNotMatch(text(content), /ANCIENNE RÉPONSE/);
   assert.match(text(content), /AUCUN CYCLE/);
+  const message = vm.runInContext('friendly(new Error("Operator authentication required"))', context);
+  assert.match(message, /Clé opérateur manquante ou incorrecte/);
+  assert.match(vm.runInContext('friendly(new Error("autre chose"))', context), /autre chose/);
   console.log("Navigation locale : réponses obsolètes ignorées.");
 }
 run().catch(error => { console.error(error); process.exitCode = 1; });
