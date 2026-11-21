@@ -2,6 +2,7 @@ import json
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -166,10 +167,16 @@ class KeepAwakeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             store, pilot, _ = build(temp, {"XAUUSD": rising("XAUUSD")})
             runner = autopilot.AutopilotRunner(pilot, poll_seconds=0.01, keep_awake=KeepAwake(setter=calls.append))
-            autopilot.set_mode(store, "observe", author="t")
+            # mode "off": the loop runs without any analysis cycle, so the test never depends on how fast the machine is
             runner.start()
+            for _ in range(200):  # wait (bounded) until the loop has really started its first pass
+                if calls:
+                    break
+                time.sleep(0.05)
             runner._stop.set()
-            runner._thread.join(5)
+            runner._thread.join(30)
+            self.assertFalse(runner._thread.is_alive())
+            self.assertGreaterEqual(len(calls), 2)  # at least one pass, then the release at the end
             self.assertEqual(calls[-1], ES_CONTINUOUS)
             self.assertEqual(store.state_get("autopilot_keep_awake"), "false")
 
