@@ -370,6 +370,8 @@ class Autopilot:
         try:
             candles, meta = self.fetch(symbol, timeframe, int(config["bars"]))
         except Exception as exc:  # noqa: BLE001 - the loop must survive any data problem
+            if "No live tick" in str(exc):  # a closed market (gold at night or on the weekend) is not an error
+                return {"symbol": symbol, "status": "stale", "message": "marché fermé : aucune cotation"}
             self.store.journal.log("autopilot.data_error", symbol, {"error": type(exc).__name__, "message": str(exc)[:200]})
             return {"symbol": symbol, "status": "data_error", "message": str(exc)[:200]}
         if len(candles) < 40:

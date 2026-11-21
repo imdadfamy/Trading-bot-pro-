@@ -347,6 +347,19 @@ class CycleTests(unittest.TestCase):
             pilot.fetch = broken
             self.assertEqual(pilot.run_symbol("XAUUSD")["status"], "data_error")
 
+    def test_a_closed_market_is_reported_as_closed_not_as_an_error(self):
+        with tempfile.TemporaryDirectory() as temp:
+            store, pilot, _ = build(temp, {"XAUUSD": rising("XAUUSD")}, FakeProvider())
+
+            def closed(symbol, timeframe, count):
+                raise RuntimeError("No live tick to measure the server clock (market closed, or symbol just added)")
+            pilot.fetch = closed
+            result = pilot.run_symbol("XAUUSD")
+            self.assertEqual(result["status"], "stale")
+            self.assertIn("fermé", result["message"])
+            self.assertNotIn("autopilot.data_error", [e["kind"] for e in store.journal.events(20)])
+            self.assertEqual(decisions(store), [])
+
     def test_a_scheduled_announcement_blocks_gold_but_not_synthetic_indices(self):
         with tempfile.TemporaryDirectory() as temp:
             provider = FakeProvider()
