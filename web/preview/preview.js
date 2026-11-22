@@ -74,6 +74,7 @@ function labeled(container, values) { const section=node("div","stats"); for (co
 function friendly(error) {
   const text = String(error && error.message ? error.message : error);
   if (text.includes("Operator authentication")) return "Clé opérateur manquante ou incorrecte : copie-la depuis la fenêtre noire ouverte par Lancer-Application.bat (elle change à chaque lancement) et colle-la dans le champ « Clé opérateur ».";
+  if (text.startsWith("instrument_risk")) return "Risque ou lot par instrument refusé : le risque d'un ordre simple va de 0,05 % à 5 % du capital et le lot doit être positif.";
   if (text.startsWith("basket")) return "Réglage du panier refusé : le nombre de positions doit être entre 2 et 50, le gain cible entre 1 et 100 000 $, et les instruments une liste de noms.";
   if (text.includes("Confirmation phrase")) return "Phrase de confirmation absente ou fausse : recopie-la exactement.";
   return text;
@@ -600,14 +601,45 @@ function settingsPage() {
     const [posLabel,posInput]=formLabel("Nombre de positions par panier (2 à 50)","number",bk.positions??20);
     const [tgtLabel,tgtInput]=formLabel("Gain cible du panier en dollars","number",bk.target_usd??50);tgtInput.step="any";
     const basketNums=node("div","form-group");append(basketNums,posLabel,tgtLabel);
-    append(basketBox,node("div","label","Instruments du panier"),basketPick,basketFlags,basketNums);
+    // the basket's OWN risk settings, apart from the general ones (empty = follow the general setting)
+    const pctNow=v=>v==null?"":Number((v*100).toFixed(4));
+    const [bRiskLabel,bRisk]=formLabel("Risque total du panier (% du capital)","number",pctNow(bk.risk_per_trade));
+    const [bCapLabel,bCap]=formLabel("Plafond de risque ouvert pendant un panier (%)","number",pctNow(bk.max_open_risk));
+    const [bLotLabel,bLot]=formLabel("Lot de CHAQUE position du panier (vide = calculé d'après le risque)","number",bk.fixed_lot==null?"":bk.fixed_lot);
+    const [bSpreadLabel,bSpread]=formLabel("Écart d'achat-vente maximal du panier (vide = réglage général)","number",bk.max_spread==null?"":bk.max_spread);
+    [bRisk,bCap,bLot,bSpread].forEach(i=>{i.step="any";i.placeholder="comme le général";});
+    const basketRisk=node("div","form-group");append(basketRisk,bRiskLabel,bCapLabel,bLotLabel,bSpreadLabel);
+    append(basketBox,node("div","label","Instruments du panier"),basketPick,basketFlags,basketNums,
+      node("div","label","Risque du panier (réglage à part, vide = comme le réglage général de risque)"),basketRisk);
     append(group,basketBox);
+    // risk or lot per instrument, for the single order and for the basket (empty = the general / basket setting)
+    const instBox=node("div","symbol-checks basket-box");
+    append(instBox,node("div","label","Risque ou lot par instrument"),
+      node("small","","Pour chaque instrument, tu peux choisir un risque (en % du capital) ou un lot, pour l'ordre simple et pour le panier. Une case vide veut dire : comme le réglage général (ordre simple) ou comme le réglage du panier ci-dessus. Un lot fixe l'emporte sur le risque. Pour le panier, le risque est le total du panier et le lot est celui de chaque position."));
+    const instGrid=node("div","inst-grid");
+    ["Instrument","Ordre simple · risque %","Ordre simple · lot","Panier · positions","Panier · cible $","Panier · risque total %","Panier · lot par position"].forEach(h=>append(instGrid,node("div","inst-head",h)));
+    const instRows=known.map(name=>{
+      const s=(cfg.instrument_risk||{})[name]||{};const p=((cfg.basket||{}).per_symbol||{})[name]||{};
+      const cell=(v,percent)=>{const i=node("input");i.type="number";i.step="any";i.placeholder="—";i.value=v==null?"":(percent?pctNow(v):v);return i;};
+      const r={name,sRisk:cell(s.risk_per_trade,true),sLot:cell(s.fixed_lot),bPos:cell(p.positions),bTarget:cell(p.target_usd),bRisk:cell(p.risk_per_trade,true),bLot:cell(p.fixed_lot)};
+      append(instGrid,node("div","inst-name",name),r.sRisk,r.sLot,r.bPos,r.bTarget,r.bRisk,r.bLot);return r;});
+    const instScroll=node("div","inst-scroll");append(instScroll,instGrid);append(instBox,instScroll);append(group,instBox);
+    const pct=i=>i.value.trim()===""?null:Number(i.value)/100;const plain=i=>i.value.trim()===""?null:Number(i.value);
     const save=node("button","","Enregistrer les réglages des agents");
     save.addEventListener("click",async()=>{
       const patch={symbols:fields.symbols.value.split(",").map(s=>s.trim()).filter(Boolean),timeframe:fields.timeframe.value.trim(),execution_arms:fields.execution_arms.value.split(",").map(s=>s.trim()).filter(Boolean),opposite_signal_policy:fields.opposite_signal_policy.value.trim()};
       for(const f of ["model_every_minutes","horizon_bars","stop_atr_multiple","reward_multiple","skill_pack_size"])patch[f]=Number(fields[f].value);
       if(!patch.symbols.length){pilotNote.textContent="Coche au moins un instrument à analyser.";return;}
-      patch.basket={symbols:basketChecks.filter(c=>c.checked).map(c=>c.dataset.symbol),positions:Number(posInput.value),target_usd:Number(tgtInput.value),simulate:simBox.checked,enabled:realBox.checked};
+      patch.basket={symbols:basketChecks.filter(c=>c.checked).map(c=>c.dataset.symbol),positions:Number(posInput.value),target_usd:Number(tgtInput.value),simulate:simBox.checked,enabled:realBox.checked,
+        risk_per_trade:pct(bRisk),max_open_risk:pct(bCap),fixed_lot:plain(bLot),max_spread:plain(bSpread),per_symbol:{}};
+      patch.instrument_risk={};
+      instRows.forEach(r=>{
+        const single={};if(pct(r.sRisk)!==null)single.risk_per_trade=pct(r.sRisk);if(plain(r.sLot)!==null)single.fixed_lot=plain(r.sLot);
+        if(Object.keys(single).length)patch.instrument_risk[r.name]=single;
+        const own={};if(plain(r.bPos)!==null)own.positions=plain(r.bPos);if(plain(r.bTarget)!==null)own.target_usd=plain(r.bTarget);
+        if(pct(r.bRisk)!==null)own.risk_per_trade=pct(r.bRisk);if(plain(r.bLot)!==null)own.fixed_lot=plain(r.bLot);
+        if(Object.keys(own).length)patch.basket.per_symbol[r.name]=own;
+      });
       if(patch.basket.enabled&&!bk.enabled){
         if(!patch.basket.symbols.length){pilotNote.textContent="Coche au moins un instrument pour le panier réel.";return;}
         if(typeof confirm==="function"&&!confirm(`Activer le panier RÉEL (compte démo) ? Chaque décision d'achat ou de vente sur ${patch.basket.symbols.join(", ")} ouvrira ${patch.basket.positions} positions, fermées ensemble à +${patch.basket.target_usd} $. Les ordres automatiques doivent aussi être activés.`))return;

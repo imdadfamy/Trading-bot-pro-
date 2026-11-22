@@ -215,7 +215,7 @@ class Executor:
 
     def send_basket(self, store, *, decision_id: str, symbol: str, side: str, arm: str, plan: dict, limits: Limits,
                     risk: dict, ai_spend: float, offset_hours: float, now: datetime, halt: str | None, rationale: str = "",
-                    positions: int, target_usd: float) -> dict:
+                    positions: int, target_usd: float, member_lot: float | None = None) -> dict:
         """Open ``positions`` identical positions in a row, ALL OR NOTHING; the pilot closes them together at ``target_usd``.
 
         Every member goes through the whole chain of ``send`` (stop on entries, demo account, live quote, risk engine with
@@ -223,7 +223,8 @@ class Executor:
         member fails, the ones already open are closed at once and the basket is cancelled. A member with an unknown
         outcome arms the emergency stop as usual and the members already open keep their broker-side protection.
         """
-        basket = {"id": decision_id, "n": int(positions), "tickets": [], "target_usd": float(target_usd)}
+        basket = {"id": decision_id, "n": int(positions), "tickets": [], "target_usd": float(target_usd),
+                  "member_lot": float(member_lot) if member_lot else None}  # the basket's own lot, for EACH member
         store.state_set(f"basket:{decision_id}", json.dumps({"symbol": symbol, "arm": arm, "side": side, "positions": int(positions),
                                                              "target_usd": float(target_usd), "at": now.isoformat()}))
         opened = []
@@ -341,7 +342,9 @@ class Executor:
                                     float(info.volume_max), float(info.volume_step),
                                     float(risk.get("commission_per_lot", 0.0)), slippage_ticks)
             fixed = risk.get("fixed_lot")
-            if basket:  # the basket carries the risk (or fixed lot) of one position, split between its members
+            if basket and basket.get("member_lot"):
+                fixed = basket["member_lot"]  # the basket's own setting: this lot for every member, no splitting
+            elif basket:  # the basket carries the risk (or fixed lot) of one position, split between its members
                 fixed = fixed / basket["n"] if fixed else fixed
                 limits = replace(limits, risk_per_trade=limits.risk_per_trade / basket["n"])
             # Spreads live on very different price scales: 0 means automatic, a spread of at most 20% of the stop.

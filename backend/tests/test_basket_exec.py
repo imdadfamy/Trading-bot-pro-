@@ -56,9 +56,11 @@ class BasketMT5(AutoMT5):
 
 
 def basket_args(decision_id=None, **extra):
-    return dict(decision_id=decision_id or str(uuid.uuid4()), symbol="XAUUSD", side="BUY", arm="det:graph", plan=PLAN,
-                limits=Limits(), risk=RISK, ai_spend=0.0, offset_hours=0.0, now=utcnow(), halt=None, positions=4,
-                target_usd=10.0, **extra)
+    options = dict(decision_id=decision_id or str(uuid.uuid4()), symbol="XAUUSD", side="BUY", arm="det:graph", plan=PLAN,
+                   limits=Limits(), risk=RISK, ai_spend=0.0, offset_hours=0.0, now=utcnow(), halt=None, positions=4,
+                   target_usd=10.0)
+    options.update(extra)
+    return options
 
 
 class BasketExecutionTests(Base):

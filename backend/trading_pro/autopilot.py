@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from hashlib import sha256
 from statistics import median
@@ -48,8 +48,20 @@ DEFAULT_CONFIG = {
     # identical positions (same stop and target as the single position) that closes as a whole when its gain reaches
     # target_usd; one basket at a time per instrument and arm. enabled: the same as REAL demo orders, in place of the single
     # order on these instruments (off by default). The single-position system is left untouched everywhere else.
-    "basket": {"symbols": ["Volatility 10 Index"], "positions": 20, "target_usd": 50.0, "simulate": True, "enabled": False},
+    "basket": {"symbols": ["Volatility 10 Index"], "positions": 20, "target_usd": 50.0, "simulate": True, "enabled": False,
+               # The basket's OWN risk settings (None = follow the general risk settings): total risk of the basket as a share of
+               # the capital, the cap on open risk while a basket is open, a fixed lot for EACH member, the spread limit.
+               "risk_per_trade": None, "max_open_risk": None, "fixed_lot": None, "max_spread": None,
+               # Per instrument: positions, target_usd, risk_per_trade, fixed_lot (anything left out follows the basket setting).
+               "per_symbol": {}},
+    # Per-instrument risk of the SINGLE order (anything left out follows the general risk settings): risk_per_trade (a share of
+    # the capital) or fixed_lot (the lot of one position, which wins over the risk).
+    "instrument_risk": {},
 }
+BASKET_LIMITS = {"risk_per_trade": (0.0005, 0.10), "max_open_risk": (0.0005, 0.25), "fixed_lot": (0.0001, 100000),
+                 "max_spread": (0, 100000), "positions": (2, 50), "target_usd": (1, 100000)}
+INSTRUMENT_LIMITS = {"risk_per_trade": (0.0005, 0.05), "fixed_lot": (0.0001, 100000)}
+PER_SYMBOL_KEYS = ("positions", "target_usd", "risk_per_trade", "fixed_lot")
 BASKET_PREFIX = "basket:"
 BASKET_ASSUMED_EQUITY = 10000.0  # only used when the account equity has never been read
 OPPOSITE_POLICIES = ("ignore", "close_if_profit", "close")
@@ -92,7 +104,46 @@ def get_config(store: ResearchStore) -> dict:
     config = dict(DEFAULT_CONFIG)
     if raw:
         config.update(json.loads(raw))
+    config["basket"] = {**DEFAULT_CONFIG["basket"], **(config.get("basket") or {})}  # settings added later get their default
     return config
+
+
+def _number_ok(value, low, high) -> bool:
+    return value is None or (not isinstance(value, bool) and isinstance(value, (int, float)) and low <= value <= high)
+
+
+def _spec_ok(spec, allowed, limits) -> bool:
+    return isinstance(spec, dict) and set(spec) <= set(allowed) and all(_number_ok(spec[k], *limits[k]) for k in spec)
+
+
+def single_terms(config: dict, symbol: str, limits: Limits, risk: dict) -> tuple[Limits, dict]:
+    """The general risk settings, adjusted by what the operator chose for this instrument (single orders)."""
+    spec = (config.get("instrument_risk") or {}).get(symbol) or {}
+    risk = dict(risk)
+    if spec.get("risk_per_trade") is not None:
+        limits = replace(limits, risk_per_trade=float(spec["risk_per_trade"]))
+    if spec.get("fixed_lot") is not None:
+        risk["fixed_lot"] = float(spec["fixed_lot"])
+    return limits, risk
+
+
+def basket_terms(config: dict, symbol: str, limits: Limits, risk: dict) -> dict:
+    """Everything a basket needs, from ITS OWN settings first (per instrument, then the basket's), then the general ones."""
+    basket = config.get("basket") or {}
+    spec = (basket.get("per_symbol") or {}).get(symbol) or {}
+
+    def pick(key):
+        return spec[key] if spec.get(key) is not None else basket.get(key)
+    risk = dict(risk)
+    if pick("risk_per_trade") is not None:
+        limits = replace(limits, risk_per_trade=float(pick("risk_per_trade")))
+    if basket.get("max_open_risk") is not None:
+        limits = replace(limits, max_open_risk=float(basket["max_open_risk"]))
+    if basket.get("max_spread") is not None:
+        limits = replace(limits, max_spread=float(basket["max_spread"]))
+    return {"positions": int(pick("positions") or DEFAULT_CONFIG["basket"]["positions"]),
+            "target_usd": float(pick("target_usd") or DEFAULT_CONFIG["basket"]["target_usd"]),
+            "member_lot": float(pick("fixed_lot")) if pick("fixed_lot") is not None else None, "limits": limits, "risk": risk}
 
 
 def timeframe_for(config: dict, symbol: str) -> str:
@@ -123,7 +174,20 @@ def set_config(store: ResearchStore, patch: dict, *, author: str) -> dict:
             for sub, (low, high) in {"positions": (2, 50), "target_usd": (1, 100000)}.items():
                 if sub in item and (isinstance(item[sub], bool) or not isinstance(item[sub], (int, float)) or not low <= item[sub] <= high):
                     raise ValueError(f"basket.{sub} must be between {low} and {high}")
+            for sub in ("risk_per_trade", "max_open_risk", "fixed_lot", "max_spread"):
+                if sub in item and not _number_ok(item[sub], *BASKET_LIMITS[sub]):
+                    raise ValueError(f"basket.{sub} must be empty or between {BASKET_LIMITS[sub][0]} and {BASKET_LIMITS[sub][1]}")
+            per_symbol = item.get("per_symbol", {})
+            if (not isinstance(per_symbol, dict) or len(per_symbol) > 24
+                    or any(not isinstance(s, str) or not 1 <= len(s) <= 60 or not _spec_ok(v, PER_SYMBOL_KEYS, BASKET_LIMITS)
+                           for s, v in per_symbol.items())):
+                raise ValueError("basket.per_symbol must map instrument names to positions, target_usd, risk_per_trade, fixed_lot within their limits")
             item = {**config.get("basket", DEFAULT_CONFIG["basket"]), **item}
+        elif key == "instrument_risk":
+            if (not isinstance(item, dict) or len(item) > 24
+                    or any(not isinstance(s, str) or not 1 <= len(s) <= 60 or not _spec_ok(v, INSTRUMENT_LIMITS, INSTRUMENT_LIMITS)
+                           for s, v in item.items())):
+                raise ValueError("instrument_risk must map instrument names to risk_per_trade (0.0005 to 0.05) and fixed_lot (positive)")
         elif key == "timeframe":
             if item not in TIMEFRAME_SECONDS:
                 raise ValueError("timeframe must be one of " + ", ".join(TIMEFRAME_SECONDS))
@@ -307,28 +371,30 @@ class Autopilot:
         return decision_id
 
     # -- basket twin (simulation): the same decision, traded as a basket that closes as a whole on a money target
-    def _basket_risk_money(self) -> tuple[float, bool]:
+    def _basket_risk_money(self, risk_per_trade: float) -> tuple[float, bool]:
         account = json.loads(self.store.state_get("autopilot_account") or "null") or {}
         equity = float(account.get("equity") or account.get("balance") or 0)
         assumed = equity <= 0
         if assumed:
             equity = BASKET_ASSUMED_EQUITY
-        return equity * float(self.limits_provider().risk_per_trade), assumed
+        return equity * float(risk_per_trade), assumed
 
     def _basket_twin(self, cycle_id, symbol, at, arm, action, plan, config, origin_id, origin_status) -> None:
         basket = config.get("basket") or {}
         if not basket.get("simulate") or symbol not in basket.get("symbols", []) or arm not in config.get("execution_arms", []):
             return
-        risk_money, assumed = self._basket_risk_money()
-        target_usd = float(basket["target_usd"])
+        terms = basket_terms(config, symbol, self.limits_provider(), {})
+        risk_money, assumed = self._basket_risk_money(terms["limits"].risk_per_trade)
+        target_usd = terms["target_usd"]
         # The basket's total risk is the single position's risk (0.5% of equity by default), so +target_usd is
         # target_usd / risk_money times the stop distance; the positions' own target (reward_multiple) still applies.
         target_r = target_usd / risk_money if risk_money > 0 else plan["reward_multiple"]
         detail = {"variant": "basket",
-                  "rationale": f"basket of {basket['positions']} identical positions, closed together at +{target_usd:g} USD (simulation)",
+                  "rationale": f"basket of {terms['positions']} identical positions, closed together at +{target_usd:g} USD (simulation)",
                   "twin_of": origin_id if origin_status == "open" else None,
-                  "basket": {"positions": basket["positions"], "target_usd": target_usd, "risk_money": round(risk_money, 2),
-                             "target_r": round(target_r, 4), "equity_assumed": assumed}}
+                  "basket": {"positions": terms["positions"], "target_usd": target_usd, "risk_money": round(risk_money, 2),
+                             "target_r": round(target_r, 4), "equity_assumed": assumed,
+                             "risk_per_trade": terms["limits"].risk_per_trade, "lot_based": terms["member_lot"] is not None}}
         twin_arm = BASKET_PREFIX + arm
         if self._has_open(symbol, twin_arm):  # one basket at a time: the next one starts only once this one is closed
             status = "skipped_open"
@@ -587,13 +653,18 @@ class Autopilot:
             basket = config.get("basket") or {}
             as_basket = bool(basket.get("enabled")) and symbol in basket.get("symbols", [])
             try:
+                if as_basket:  # the basket has its own settings, apart from the single order's
+                    terms = basket_terms(config, symbol, self.limits_provider(), self.risk_provider())
+                    limits, risk_terms = terms["limits"], terms["risk"]
+                else:
+                    limits, risk_terms = single_terms(config, symbol, self.limits_provider(), self.risk_provider())
                 options = dict(decision_id=row["decision_id"], symbol=symbol, side=row["action"], arm=arm,
-                               plan={**plan, "max_age_seconds": int(plan["horizon_bars"] * step)}, limits=self.limits_provider(),
-                               risk=self.risk_provider(), ai_spend=self.store.costs()["total_usd"], offset_hours=self.offset_hours,
+                               plan={**plan, "max_age_seconds": int(plan["horizon_bars"] * step)}, limits=limits,
+                               risk=risk_terms, ai_spend=self.store.costs()["total_usd"], offset_hours=self.offset_hours,
                                now=now, halt=halt, rationale=json.loads(row["detail"]).get("rationale", ""))
                 if as_basket:  # a basket of identical positions in place of the single order, all or nothing
-                    report = self.executor.send_basket(self.store, positions=int(basket["positions"]),
-                                                       target_usd=float(basket["target_usd"]), **options)
+                    report = self.executor.send_basket(self.store, positions=terms["positions"], target_usd=terms["target_usd"],
+                                                       member_lot=terms["member_lot"], **options)
                 else:
                     report = self.executor.send(self.store, **options)
             except Exception as exc:  # noqa: BLE001 - an execution problem must never stop the analysis
