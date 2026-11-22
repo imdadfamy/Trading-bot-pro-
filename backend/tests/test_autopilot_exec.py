@@ -50,7 +50,7 @@ class Base(unittest.TestCase):
         self.store.release_killed(author="t", reason="test")
 
     def executor(self, fake):
-        return Executor(fake, LOGIN, SERVER, PASSWORD)
+        return Executor(fake, LOGIN, SERVER, PASSWORD, sleep=lambda seconds: None)
 
     def send(self, fake, *, decision_id="d1", limits=None, risk=None, halt=None, side="BUY", ai_spend=0.0):
         return self.executor(fake).send(self.store, decision_id=decision_id, symbol="XAUUSD", side=side, arm="skills:director",
@@ -82,6 +82,35 @@ class SendTests(Base):
         self.assertIn("signal.created", self.kinds())  # every order is tied to a journaled signal
         self.assertTrue(self.store.journal.verify_audit())
         self.assertEqual(fake.calls[-1], "shutdown")
+
+    def test_a_broker_clock_running_fast_does_not_make_a_live_quote_look_stale(self):
+        class Skewed(AutoMT5):  # seen on a synthetic-index server: its clock is 25 s ahead, and its ticks keep coming
+            calls_made = 0
+
+            def symbol_info_tick(self, name):
+                Skewed.calls_made += 1
+                return NS(time=int(datetime.now(timezone.utc).timestamp() + 25), time_msc=Skewed.calls_made,
+                          bid=2000.0, ask=2000.0 + self.spread)
+        result = self.send(Skewed())
+        self.assertEqual(result["state"], "open")
+
+    def test_a_frozen_quote_is_still_refused_whatever_the_clock_says(self):
+        class Frozen(AutoMT5):  # same skew, but the feed does not move: a closed market or a dead connection
+            def symbol_info_tick(self, name):
+                return NS(time=int(datetime.now(timezone.utc).timestamp() + 25), time_msc=1, bid=2000.0, ask=2000.0 + self.spread)
+        fake = Frozen()
+        result = self.send(fake)
+        self.assertEqual((result["state"], result["code"], fake.sent), ("refused", "stale_quote", []))
+
+    def test_a_moving_quote_whose_time_is_wildly_off_is_refused(self):
+        class Wrong(AutoMT5):
+            calls_made = 0
+
+            def symbol_info_tick(self, name):
+                Wrong.calls_made += 1
+                return NS(time=int(datetime.now(timezone.utc).timestamp() + 3600), time_msc=Wrong.calls_made, bid=2000.0, ask=2001.0)
+        result = self.send(Wrong())
+        self.assertEqual((result["state"], result["code"]), ("refused", "stale_quote"))
 
     def test_the_broker_minimum_distance_overrides_a_stop_that_is_too_tight(self):
         fake = AutoMT5(spread=0.29)

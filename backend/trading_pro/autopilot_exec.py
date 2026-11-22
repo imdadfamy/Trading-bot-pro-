@@ -19,6 +19,7 @@ the pilot's ``execution_arms`` setting.
 from __future__ import annotations
 
 import json
+import time
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, ROUND_DOWN
@@ -32,6 +33,8 @@ from .mt5_status import ReadOnlyMT5, connect_demo
 DEAL_OUT = (1, 2, 3)  # DEAL_ENTRY_OUT, INOUT, OUT_BY
 REASONS = {0: "terminal", 1: "mobile", 2: "web", 3: "programme", 4: "stop", 5: "objectif", 6: "appel de marge"}
 MAX_TICK_AGE_SECONDS = 15.0
+CLOCK_SKEW_SECONDS = 90.0  # a broker clock may run slightly fast or slow; a live, advancing tick within this band is fresh
+LIVE_WAIT_SECONDS = 4.0
 
 
 class Refused(RuntimeError):
@@ -50,8 +53,40 @@ class Executor:
     password: str | None = None
     terminal_path: str | None = None
     timeout_ms: int = 20000
+    sleep: object = time.sleep
+    live_wait_seconds: float = LIVE_WAIT_SECONDS
 
     # ------------------------------------------------------------------ helpers
+    def _fresh_tick(self, mt5, symbol, offset, now):
+        """The latest tick, if the quote is really live. Returns ``(tick, age_seconds)``, or raises Refused.
+
+        Normally the tick's age is measured against the local clock. But a broker's clock can differ from UTC by a
+        few seconds (seen: a synthetic-index server 25 s ahead), which made every fresh tick look like it came from
+        the future. When the age is out of the normal window, liveness is proven instead: the feed must deliver a
+        NEWER tick while we watch (a frozen or closed market does not), and its time must stay within a sane band.
+        """
+        tick = mt5.symbol_info_tick(symbol)
+        if tick is None:
+            raise Refused("no_tick", "No tick available: the market may be closed")
+
+        def age_of(item) -> float:
+            return now.timestamp() - (getattr(item, "time", 0) - offset)
+        age = age_of(tick)
+        if -2 <= age <= MAX_TICK_AGE_SECONDS:
+            return tick, age
+        waited = 0.0
+        while waited < self.live_wait_seconds:
+            self.sleep(0.5)
+            waited += 0.5
+            newer = mt5.symbol_info_tick(symbol)
+            if newer is not None and (getattr(newer, "time_msc", 0), getattr(newer, "time", 0)) > (
+                    getattr(tick, "time_msc", 0), getattr(tick, "time", 0)):
+                moved = age_of(newer) + waited  # the local clock moved on while we waited: compare like with like
+                if abs(moved) <= CLOCK_SKEW_SECONDS:
+                    return newer, moved
+                break
+        raise Refused("stale_quote", f"The latest tick is {age:.0f} s old (or not moving): no order on a stale quote")
+
     def _connect(self):
         mt5 = ReadOnlyMT5(self.module, SEND_ALLOWED)
         account = connect_demo(mt5, expected_login=self.login, server=self.server, password=self.password,
@@ -185,13 +220,8 @@ class Executor:
             mine = self._ours(mt5)
             if any(p.symbol == symbol for p in mine):
                 raise Refused("position_open", f"A position of the project is already open on {symbol}")
-            tick = mt5.symbol_info_tick(symbol)
-            if tick is None:
-                raise Refused("no_tick", "No tick available: the market may be closed")
             offset = offset_hours * 3600
-            tick_age = now.timestamp() - (getattr(tick, "time", 0) - offset)
-            if not -2 <= tick_age <= MAX_TICK_AGE_SECONDS:
-                raise Refused("stale_quote", f"The latest tick is {tick_age:.0f} s old: no order on a stale quote")
+            tick, _ = self._fresh_tick(mt5, symbol, offset, now)
             equity = float(getattr(account, "equity", None) or getattr(account, "balance", 0))
             daily_start = self._daily_start_equity(mt5, account, now, offset)
             open_risk = self._open_risk(mt5, mine, equity, limits.max_open_risk)
