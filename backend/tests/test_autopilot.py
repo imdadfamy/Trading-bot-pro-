@@ -431,6 +431,18 @@ class ModeAndRunnerTests(unittest.TestCase):
             self.assertIn("calendar exploded", status["last_error"])
             self.assertTrue(decisions(store, symbol="Volatility 75 Index"))
 
+    def test_an_instrument_ticked_off_stays_listed_so_it_can_be_ticked_back_on(self):
+        with tempfile.TemporaryDirectory() as temp:
+            store = ResearchStore(str(Path(temp) / "t.db"))
+            defaults = autopilot.get_config(store)["symbols"]
+            autopilot.set_config(store, {"symbols": [s for s in defaults if s != "Boom 500 Index"]}, author="op")
+            state = autopilot.status(store)
+            self.assertNotIn("Boom 500 Index", state["config"]["symbols"])  # no longer analysed
+            self.assertIn("Boom 500 Index", state["known_symbols"])  # but still offered by the form
+            self.assertEqual(len(state["known_symbols"]), len(set(state["known_symbols"])))
+            autopilot.set_config(store, {"symbols": state["config"]["symbols"] + ["Jump 10 Index"]}, author="op")
+            self.assertEqual(autopilot.status(store)["known_symbols"][-1], "Jump 10 Index")  # a custom one is added after
+
     def test_the_form_can_always_save_back_the_default_instruments(self):
         with tempfile.TemporaryDirectory() as temp:
             store = ResearchStore(str(Path(temp) / "t.db"))

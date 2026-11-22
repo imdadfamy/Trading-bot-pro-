@@ -747,7 +747,10 @@ def status(store: ResearchStore, now: datetime | None = None) -> dict:
             "SELECT status, COUNT(*) AS n FROM decisions GROUP BY status")}
         today = db.execute("SELECT COUNT(*) FROM decisions WHERE at>=?", (now.strftime("%Y-%m-%d"),)).fetchone()[0]
         outcomes = db.execute("SELECT COUNT(*) FROM decision_outcomes").fetchone()[0]
-    return {"mode": mode, "active": mode != "off", "config": get_config(store),
+    config = get_config(store)
+    # every instrument the pilot knows, analysed or not, so a ticked-off one can still be ticked back on
+    known = list(dict.fromkeys([*DEFAULT_CONFIG["symbols"], *config["symbols"]]))
+    return {"mode": mode, "active": mode != "off", "config": config, "known_symbols": known,
             "alive": age is not None and age < 120, "heartbeat_age_seconds": age,
             "cycles": beat.get("cycles", 0), "errors": beat.get("errors", 0), "last_error": beat.get("last_error"),
             "last_cycle": beat.get("last_cycle", {}), "symbol_status": beat.get("symbol_status", {}),

@@ -41,6 +41,7 @@ html{scrollbar-gutter:stable}
 .chip.buy{color:var(--gain);border-color:#1e6b50;background:#10261f}.chip.sell{color:var(--loss);border-color:#7a2a2a;background:#2a1414}.chip.wait{color:#c9c9d1;border-color:#3a3a42}
 .i-foot{font-size:11px;color:var(--muted);line-height:1.5}.i-foot b{color:var(--text);font-weight:600}
 .pick{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px}.pick button{background:#1d1d22;border:1px solid var(--line);color:#b6b6bf;border-radius:7px;padding:6px 10px;font-size:11px}
+.form .symbol-checks{display:grid;gap:9px}.form .pick label.check{display:flex;flex-direction:row;align-items:center;gap:8px;background:#1d1d22;border:1px solid var(--line);color:#d6d6dc;border-radius:7px;padding:7px 11px;font-size:12px;cursor:pointer}.form .pick label.check input{padding:0;width:16px;height:16px;accent-color:#d4b675}
 .pick button.on{background:#26231d;border-color:var(--gold);color:#f4dcab}
 .candles{width:100%;height:300px;display:block}.candles .up{fill:var(--gain);stroke:var(--gain)}.candles .down{fill:var(--loss);stroke:var(--loss)}
 .candles .gridline{stroke:#24242a;stroke-width:1}.candles text{fill:#8b8b95;font-size:10px;font-family:var(--mono)}.candles .last{stroke:var(--gold);stroke-dasharray:4 4;stroke-width:1}

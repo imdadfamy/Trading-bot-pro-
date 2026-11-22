@@ -564,13 +564,21 @@ function settingsPage() {
   get("/autopilot").then(state=>{
     const cfg=state.config||{};const fields={};
     const group=node("div","form-group");
-    for(const [field,label,type] of [["symbols","Instruments (séparés par des virgules)","text"],["timeframe","Durée des bougies (M1, M5, M15, M30, H1)","text"],["model_every_minutes","Consultation de l'IA toutes les (minutes)","number"],["horizon_bars","Durée maximale d'une position simulée (bougies)","number"],["stop_atr_multiple","Stop simulé (multiple de la volatilité ATR)","number"],["reward_multiple","Objectif simulé (multiple du risque)","number"],["skill_pack_size","Compétences données à chaque analyste","number"],["execution_arms","Méthodes dont les avis deviennent des ordres démo (séparées par des virgules ; ex. skills:director, forced:director, det:graph)","text"],["opposite_signal_policy","Signal contraire pendant qu'une position est ouverte : ignore, close_if_profit (fermer si en gain) ou close (fermer)","text"]]){
+    // one tick box per instrument: ticked = analysed, unticked = left alone (open positions are still followed)
+    const analysed=new Set(cfg.symbols||[]);const known=Array.isArray(state.known_symbols)&&state.known_symbols.length?state.known_symbols:[...analysed];
+    const symbolBox=node("div","symbol-checks");append(symbolBox,node("div","label","Instruments analysés (décocher = ne plus analyser)"));
+    const symbolList=node("div","pick");const checks=known.map(name=>{const l=node("label","check");const c=node("input");c.type="checkbox";c.checked=analysed.has(name);c.dataset.symbol=name;append(l,c,node("span","",name));append(symbolList,l);return c;});
+    const [extraLabel,extra]=formLabel("Autre instrument (nom exact, séparés par des virgules)","text","");
+    fields.symbols={get value(){return [...checks.filter(c=>c.checked).map(c=>c.dataset.symbol),...extra.value.split(",").map(s=>s.trim()).filter(Boolean)].join(",");}};
+    append(symbolBox,symbolList,extraLabel);append(pilotForm,symbolBox);
+    for(const [field,label,type] of [["timeframe","Durée des bougies (M1, M5, M15, M30, H1)","text"],["model_every_minutes","Consultation de l'IA toutes les (minutes)","number"],["horizon_bars","Durée maximale d'une position simulée (bougies)","number"],["stop_atr_multiple","Stop simulé (multiple de la volatilité ATR)","number"],["reward_multiple","Objectif simulé (multiple du risque)","number"],["skill_pack_size","Compétences données à chaque analyste","number"],["execution_arms","Méthodes dont les avis deviennent des ordres démo (séparées par des virgules ; ex. skills:director, forced:director, det:graph)","text"],["opposite_signal_policy","Signal contraire pendant qu'une position est ouverte : ignore, close_if_profit (fermer si en gain) ou close (fermer)","text"]]){
       const current=Array.isArray(cfg[field])?cfg[field].join(", "):cfg[field];const [box,input]=formLabel(label,type,current);if(type==="number")input.step="any";fields[field]=input;append(group,box);
     }
     const save=node("button","","Enregistrer les réglages des agents");
     save.addEventListener("click",async()=>{
       const patch={symbols:fields.symbols.value.split(",").map(s=>s.trim()).filter(Boolean),timeframe:fields.timeframe.value.trim(),execution_arms:fields.execution_arms.value.split(",").map(s=>s.trim()).filter(Boolean),opposite_signal_policy:fields.opposite_signal_policy.value.trim()};
       for(const f of ["model_every_minutes","horizon_bars","stop_atr_multiple","reward_multiple","skill_pack_size"])patch[f]=Number(fields[f].value);
+      if(!patch.symbols.length){pilotNote.textContent="Coche au moins un instrument à analyser.";return;}
       try{await get("/autopilot/config",{method:"PATCH",headers:{"X-Operator-Key":agentKey.value||keyInput.value,"X-Operator-Name":"preview-local","Content-Type":"application/json"},body:JSON.stringify(patch)});pilotNote.textContent="Réglages enregistrés. Ils sont pris en compte au prochain cycle d'analyse.";}catch(error){pilotNote.textContent=friendly(error);}
     });
     append(pilotForm,group,save,pilotNote);
