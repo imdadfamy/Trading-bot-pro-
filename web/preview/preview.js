@@ -1,10 +1,11 @@
 "use strict";
-const pages = ["Command Center","AI Agents","Skills Library","Market Intelligence","Trading Terminal","Session Analytics","Strategy Lab","AI Memory","Risk Center","API & Integrations","Budget Center","Settings"];
+const pages = ["Command Center","AI Agents","Skills Library","Market Intelligence","Trading Terminal","Session Analytics","Strategy Lab","AI Memory","Risk Center","API & Integrations","Budget Center","Weekly Report","Settings"];
 const endpoints = {
   "AI Agents":"/autopilot/analyses","Skills Library":"/skills","Market Intelligence":"/news/events",
   "Trading Terminal":"/signals","Session Analytics":"/sessions","Strategy Lab":"/backtests",
-  "AI Memory":"/memory","Risk Center":"/dashboard","API & Integrations":"/readiness","Budget Center":"/costs"
+  "AI Memory":"/memory","Risk Center":"/dashboard","API & Integrations":"/readiness","Budget Center":"/costs","Weekly Report":"/autopilot/report"
 };
+let reportDays = 7;
 const nav = document.getElementById("navigation");
 const liveContent = document.getElementById("content");
 // During a refresh of the page already on screen, content points to an offscreen stage and the old content stays
@@ -42,7 +43,7 @@ const labels = {
   "Command Center":"Vue d'ensemble", "AI Agents":"Agents IA", "Skills Library":"Compétences",
   "Market Intelligence":"Actualités et marché", "Trading Terminal":"Journal des signaux",
   "Session Analytics":"Sessions", "Strategy Lab":"Backtests", "AI Memory":"Mémoire collective",
-  "Risk Center":"Gestion des risques", "API & Integrations":"Intégrations", "Budget Center":"Budget IA", "Settings":"Paramètres"
+  "Risk Center":"Gestion des risques", "API & Integrations":"Intégrations", "Budget Center":"Budget IA", "Weekly Report":"Rapport de collecte", "Settings":"Paramètres"
 };
 const explanations = {
   "AI Agents":"Les analystes IA (graphique, quantitatif, et veilleur pour l'or) donnent leur avis à chaque consultation ; le directeur tranche. Voici ce qu'ils ont dit, « attente » compris, puis ce que leurs avis ont donné.",
@@ -54,7 +55,8 @@ const explanations = {
   "AI Memory":"Les observations sont enregistrées pour analyse ; aucune stratégie n'est modifiée automatiquement.",
   "Risk Center":"L'arrêt des nouvelles entrées est actif par défaut et se lève seulement quand tu actives les ordres automatiques. Les limites de risque se règlent dans Paramètres.",
   "API & Integrations":"Cette page distingue la revue locale possible des conditions encore bloquantes pour les 14 jours en démo.",
-  "Budget Center":"Quand les agents sont activés, chaque consultation de l'IA consomme du budget : la dépense réelle est mesurée ici. Un plafond peut être rétabli dans Paramètres."
+  "Budget Center":"Quand les agents sont activés, chaque consultation de l'IA consomme du budget : la dépense réelle est mesurée ici. Un plafond peut être rétabli dans Paramètres.",
+  "Weekly Report":"Ce que les agents ont appris sur la période, instrument par instrument, avec des conclusions dont les règles sont fixées à l'avance. Un fichier est aussi enregistré chaque jour dans le dossier des rapports."
 };
 function node(tag, className, text) {
   const item = document.createElement(tag);
@@ -510,7 +512,7 @@ function renderList(title, list, fields, missing) {
   append(content,panel);
 }
 async function generic(page,sequence) {
-  const data=await get(endpoints[page]);
+  const data=await get(page==="Weekly Report"?`${endpoints[page]}?days=${reportDays}`:endpoints[page]);
   if (sequence !== renderSequence) return;
   if(explanations[page])append(content,info(explanations[page]));
   if(page==="Skills Library") { append(content,info("Catalogue versionné : spécifications, pas des stratégies validées."));renderList(`Compétences (${data.length})`,data.map(e=>({...e,roleName:role(e.owner)+(e.scope==="synthetic"?" · indices synthétiques":""),stateLabel:"spécification"})),["name","roleName","stateLabel"],"Catalogue vide"); }
@@ -551,6 +553,7 @@ async function generic(page,sequence) {
       const valid=card("Validité du calendrier");Object.entries(ann.coverage||{}).forEach(([kind,c])=>append(valid,row([fr("usKinds",kind),`dernière date connue : ${value(c.last_event)}`,fr("coverage",c.status).toUpperCase()])));append(content,valid);
     }
   }
+  if(page==="Weekly Report") reportPage(data);
   if(page==="Budget Center") {const panel=card("Coûts IA enregistrés");labeled(panel,{dépense_totale_usd:data.total_usd,dépense_du_jour_usd:data.today_usd,plafond_actif:data.cap_enabled,plafond_quotidien_usd:data.daily_limit_usd,plafond_expérience_usd:data.experiment_limit_usd,appels:data.calls,nouveaux_appels_bloqués:data.new_model_calls_blocked});if(data.cap_enabled===false)append(panel,info("Aucun plafond : les agents ne s'arrêtent jamais faute de budget. La dépense reste mesurée ici et peut être limitée à tout moment dans les paramètres."));append(content,panel);}
   if(page==="Risk Center") {const panel=card("Contrôle du risque");labeled(panel,{arrêt_des_nouvelles_entrées:data.kill_switch?"ACTIF":"INCONNU",courtier:fr("values",data.broker),mode:fr("values",data.mode),ordres_à_vérifier_à_la_main:data.pending_order_intents,trading_réel_autorisé:data.live_trading});append(panel,info("Le bouton ARRÊT D’URGENCE (en haut de chaque écran) bloque aussitôt toute nouvelle entrée du pilote ; les positions déjà ouvertes gardent leur stop et leur objectif chez le courtier et restent suivies."));append(content,panel);}
   if(page==="API & Integrations") {
@@ -563,6 +566,28 @@ async function generic(page,sequence) {
 }
 function checkLabel(text,checked) {const label=node("label","check");const box=node("input");box.type="checkbox";box.checked=!!checked;append(label,box,node("span","",text));return [label,box];}
 function formLabel(text,type,valueNow) {const label=node("label","",text);const input=node("input");input.type=type;input.value=valueNow??"";append(label,input);return [label,input];}
+function reportPage(data) {
+  const bar=card("Période du rapport");const choices=node("div","pick");
+  [[1,"1 jour"],[3,"3 jours"],[7,"7 jours"],[14,"14 jours"],[30,"30 jours"]].forEach(([days,text])=>{const b=node("button",days===reportDays?"on":"",text);b.type="button";b.addEventListener("click",()=>{reportDays=days;render("Weekly Report");});append(choices,b);});
+  const link=node("a","","Télécharger ce rapport (Markdown)");link.href=`/autopilot/report.md?days=${reportDays}`;link.setAttribute("download",`rapport-${reportDays}-jours.md`);
+  append(bar,choices,node("small","",`Du ${when(data.period.since)} au ${when(data.period.until)}.`),link);append(content,bar);
+  const verdicts=card("Conclusions (règles fixées à l'avance)");
+  (data.verdicts.summary||[]).forEach(s=>append(verdicts,node("div","report-line",s)));
+  Object.entries(data.verdicts.instruments||{}).forEach(([symbol,v])=>append(verdicts,row([symbol,v.verdict==="retenu"?`${v.method} (écart ${num(v.difference)} sur les ${v.measure})`:"",v.verdict==="retenu"?"RETENU":v.verdict.toUpperCase()])));
+  if(!Object.keys(data.verdicts.instruments||{}).length)append(verdicts,empty("Pas encore de données sur cette période."));append(content,verdicts);
+  const h=data.health,c=data.costs,r=data.real;
+  const health=card("Santé du pilote, coûts et ordres réels");
+  append(health,row(["Cycles d'analyse",`${h.cycles} cycles · ${h.consultations} consultations du directeur · ${h.model_failed} appels IA en échec`,""]),
+    row(["Interruptions",`${h.interruptions.length} de plus de 20 minutes (environ ${h.interruption_minutes} minutes au total)`,h.interruptions.length?"À VÉRIFIER":"AUCUNE"]),
+    row(["Erreurs",Object.keys(h.errors).length?Object.entries(h.errors).map(([m,n])=>`${m} ×${n}`).join(" · "):"aucune",""]),
+    row(["Coût de l'IA",`${num(c.total_usd)} $ sur la période · ${num(c.per_day_usd)} $ par jour · ${c.calls} appels`,""]),
+    row(["Ordres simples réels",`${r.single_orders.reduce((n,s)=>n+s.n,0)} fermés · résultat net ${signed(r.single_net)} $`,""]),
+    row(["Paniers réels",`${r.baskets.length} fermés · résultat net ${signed(r.baskets_net)} $ · ${r.baskets_lost} perdant${r.baskets_lost>1?"s":""}`,""]));
+  append(content,health);
+  const detail=card("Rapport détaillé");
+  append(detail,info(data.reading_guide));
+  const text=node("pre","report-text",data.markdown);append(detail,text);append(content,detail);
+}
 function settingsPage() {
   append(content,info("Les clés des fournisseurs restent côté serveur. La clé opérateur saisie ici n’est pas enregistrée."));
   const panel=card("Configuration versionnée");const form=node("div","form");

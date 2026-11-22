@@ -320,6 +320,11 @@ class Service:
         if path == "/autopilot/performance":
             from . import autopilot_stats
             return autopilot_stats.performance(self.store)
+        if path == "/autopilot/report":
+            from . import weekly_report
+            raw = ((query or {}).get("days") or ["7"])[0]
+            days = int(raw) if str(raw).isdigit() else 7
+            return weekly_report.build_report(self.store, days=days)
         if path == "/autopilot/decisions":
             from . import autopilot_stats
             return autopilot_stats.recent_decisions(self.store)

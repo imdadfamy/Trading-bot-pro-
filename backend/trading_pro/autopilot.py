@@ -999,8 +999,9 @@ def status(store: ResearchStore, now: datetime | None = None) -> dict:
 class AutopilotRunner:
     """Daemon thread that follows the persisted mode; safe to start once per process."""
 
-    def __init__(self, autopilot: Autopilot, *, poll_seconds: float = 10.0, keep_awake=None):
+    def __init__(self, autopilot: Autopilot, *, poll_seconds: float = 10.0, keep_awake=None, report_dir=None):
         from .keep_awake import KeepAwake
+        self.report_dir = report_dir  # where the daily report is written (None: no file)
         self.keep_awake = keep_awake if keep_awake is not None else KeepAwake()
         self.autopilot = autopilot
         self.poll = poll_seconds
@@ -1018,6 +1019,27 @@ class AutopilotRunner:
 
     def stop(self) -> None:
         self._stop.set()
+
+    def _daily_report(self, now) -> None:
+        """Once per UTC day (shortly after midnight) write the report of the last seven days: it is ready when the week ends."""
+        if self.report_dir is None or now.hour == 0 and now.minute < 5:
+            return
+        store = self.autopilot.store
+        day = now.strftime("%Y-%m-%d")
+        if store.state_get("autopilot_report_day") == day:
+            return
+        store.state_set("autopilot_report_day", day)  # whatever happens below, never more than one attempt a day
+        try:
+            from pathlib import Path
+            from .weekly_report import build_report
+            text = build_report(store, days=7, now=now)["markdown"]
+            folder = Path(self.report_dir)
+            folder.mkdir(parents=True, exist_ok=True)
+            (folder / f"rapport-{day}.md").write_text(text, encoding="utf-8")
+            (folder / "dernier-rapport.md").write_text(text, encoding="utf-8")
+            store.journal.log("autopilot.report_written", day, {"file": f"rapport-{day}.md"})
+        except Exception as exc:  # noqa: BLE001 - a report problem must never stop the pilot
+            store.journal.log("autopilot.error", "report", {"error": type(exc).__name__, "message": str(exc)[:200]})
 
     def tick(self) -> None:
         """One scheduling pass (public so tests and the CLI can drive it without a thread)."""
@@ -1041,6 +1063,7 @@ class AutopilotRunner:
                 self.autopilot.reconcile_orders()
             except Exception as exc:  # noqa: BLE001
                 store.journal.log("autopilot.error", "reconcile", {"error": type(exc).__name__, "message": str(exc)[:200]})
+        self._daily_report(now)
         if get_mode(store) not in ("observe", "demo_auto"):
             return
         config = get_config(store)

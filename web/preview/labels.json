@@ -85,6 +85,7 @@
     "autopilot.error": "Pilote automatique : erreur interne",
     "autopilot.scored": "Qualité d'une direction mesurée à horizon fixe",
     "autopilot.order_sent": "Ordre automatique envoyé au compte démo",
+    "autopilot.report_written": "Rapport de collecte du jour enregistré dans le dossier des rapports",
     "autopilot.basket_opened": "Panier ouvert : toutes les positions sont en place, chacune avec son stop et son objectif",
     "autopilot.basket_cancelled": "Panier annulé : une position a échoué, celles déjà ouvertes ont été fermées",
     "autopilot.basket_partial": "Panier incomplet : résultat d'un ordre incertain, arrêt des entrées activé, les positions ouvertes restent protégées",

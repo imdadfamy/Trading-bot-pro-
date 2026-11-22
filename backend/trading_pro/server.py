@@ -64,6 +64,12 @@ def handler_factory(service: Service, operator_key: str | None = None, runner=No
             if path == "/export/signals.csv":
                 from .exports import signals_csv
                 return self._download(signals_csv(service.store), "signals.csv", "text/csv; charset=utf-8")
+            if path == "/autopilot/report.md":
+                from . import weekly_report
+                raw = (parse_qs(urlsplit(self.path).query).get("days") or ["7"])[0]
+                days = int(raw) if raw.isdigit() else 7
+                text = weekly_report.build_report(service.store, days=days)["markdown"]
+                return self._download(text.encode("utf-8"), f"rapport-{days}-jours.md", "text/markdown; charset=utf-8")
             if path == "/audit":
                 return self._json(200, service.store.journal.events(100))
             if path == "/audit/integrity":
@@ -206,7 +212,7 @@ def main():
                                         model_setup=autopilot_runtime.model_setup_provider(service),
                                         executor=executor, limits_provider=service.limits,
                                         risk_provider=lambda: service.settings()["settings"]["risk"])
-            runner = autopilot.AutopilotRunner(pilot)
+            runner = autopilot.AutopilotRunner(pilot, report_dir=Path(args.database).parent / "reports")
             runner.start()  # follows the persisted mode: stays idle while it is "off", resumes after a restart
     server = ThreadingHTTPServer(("127.0.0.1", args.port), handler_factory(service, os.getenv("TIP_OPERATOR_KEY"), runner))
     print(f"Local API: http://127.0.0.1:{args.port} (read-only analysis, no broker orders)")

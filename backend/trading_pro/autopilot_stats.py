@@ -81,7 +81,7 @@ def _load(store: ResearchStore, symbol: str | None):
     return resolved, counts
 
 
-def basket_performance(store: ResearchStore, symbol: str | None = None) -> dict:
+def basket_performance(store: ResearchStore, symbol: str | None = None, since: str | None = None, until: str | None = None) -> dict:
     """Simulated baskets against the single position of the same decision (paired when both were resolved)."""
     query = ("SELECT d.decision_id, d.arm, d.detail, o.r_multiple, o.result, o.bars_held FROM decisions d "
              "JOIN decision_outcomes o USING(decision_id) WHERE d.arm LIKE 'basket:%' AND d.status='resolved'")
@@ -89,6 +89,12 @@ def basket_performance(store: ResearchStore, symbol: str | None = None) -> dict:
     if symbol:
         query += " AND d.symbol=?"
         args = (symbol,)
+    if since:
+        query += " AND d.at>=?"
+        args += (since,)
+    if until:
+        query += " AND d.at<?"
+        args += (until,)
     with store.journal.connect() as db:
         twins = [dict(r) for r in db.execute(query, args)]
         origins = {}
@@ -134,7 +140,7 @@ def basket_performance(store: ResearchStore, symbol: str | None = None) -> dict:
                               "secondes, la simulation bougie par bougie : les résultats réels peuvent différer un peu.")}
 
 
-def exit_performance(store: ResearchStore, symbol: str | None = None) -> dict:
+def exit_performance(store: ResearchStore, symbol: str | None = None, since: str | None = None, until: str | None = None) -> dict:
     """Horizon and target compared on the SAME entries: every variant is followed from the same decision."""
     query = ("SELECT d.cycle_id, d.arm, d.detail, o.r_multiple, o.result, o.bars_held FROM decisions d "
              "JOIN decision_outcomes o USING(decision_id) WHERE d.arm LIKE 'exit:%' AND d.status='resolved'")
@@ -142,6 +148,12 @@ def exit_performance(store: ResearchStore, symbol: str | None = None) -> dict:
     if symbol:
         query += " AND d.symbol=?"
         args = (symbol,)
+    if since:
+        query += " AND d.at>=?"
+        args += (since,)
+    if until:
+        query += " AND d.at<?"
+        args += (until,)
     with store.journal.connect() as db:
         rows = [dict(r) for r in db.execute(query, args)]
     from .autopilot import get_config
