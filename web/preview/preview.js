@@ -330,6 +330,17 @@ function performanceCards(perf) {
     `avec ${e.n_with} positions (R ${num(e.mean_r_with)}) · sans ${e.n_without} (R ${num(e.mean_r_without)}) · écart ${num(e.difference)}`,
     e.clearly_helps ? "AIDE" : e.clearly_hurts ? "NUIT" : e.underpowered ? "TROP PEU DE DONNÉES" : "INCERTAIN"])));
   out.push(skills);
+  const basketArms = Object.entries((perf.basket || {}).arms || {});
+  if (basketArms.length) {
+    const basketCard = card("Panier en simulation contre position seule");
+    append(basketCard, info("Chaque avis d'achat ou de vente d'une méthode d'exécution ouvre aussi, sur les vraies bougies, un panier de positions identiques (mêmes stop et objectif que la position seule) qui se ferme en bloc quand son gain atteint la cible en dollars. Un seul panier à la fois par instrument. Le risque total du panier est celui d'une position. Simulation : aucun ordre."));
+    basketArms.forEach(([name, b]) => { const p = b.paired || {};
+      append(basketCard, row([`${armName(b.arm)} · panier de ${b.positions ?? "?"} à +${num(b.target_usd)} $`,
+        `${b.trades} panier${b.trades > 1 ? "s" : ""} fermé${b.trades > 1 ? "s" : ""} (cible ${b.ended_on.target} · stop ${b.ended_on.stop} · délai ${b.ended_on.timeout}) · R moyen ${num(b.mean_r)} · ${num(b.usd_mean)} $ par panier · total ${num(b.usd_total)} $${b.still_open ? ` · ${b.still_open} en cours` : ""}` +
+        (p.n ? ` · même décision, position seule : R moyen ${num(p.mean_r_single)} contre panier ${num(p.mean_r_basket)} (${p.n} paires)${p.difference_interval ? ` · écart ${num(p.difference)} [${num(p.difference_interval[0])} ; ${num(p.difference_interval[1])}]` : ""}` : ""),
+        p.clearly_helps ? "LE PANIER FAIT MIEUX" : p.clearly_hurts ? "LE PANIER FAIT PIRE" : (p.underpowered || b.small_sample) ? "TROP PEU DE DONNÉES" : "INDISTINGUABLE"])); });
+    out.push(basketCard);
+  }
   const dir = perf.direction || { arms: {}, forced_vs_random: {}, observations: 0 };
   const direction = card("Qualité de la direction à horizon fixe");
   append(direction, info("Pour chaque avis d'achat ou de vente d'un cycle d'analyse, on mesure le mouvement du prix après un délai égal à l'intervalle entre deux consultations de l'IA, en distances de stop et après l'écart d'achat-vente. Sans position bloquée, ces observations sont bien plus nombreuses que les positions simulées."));

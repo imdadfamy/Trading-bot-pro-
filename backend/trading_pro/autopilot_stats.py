@@ -81,8 +81,64 @@ def _load(store: ResearchStore, symbol: str | None):
     return resolved, counts
 
 
+def basket_performance(store: ResearchStore, symbol: str | None = None) -> dict:
+    """Simulated baskets against the single position of the same decision (paired when both were resolved)."""
+    query = ("SELECT d.decision_id, d.arm, d.detail, o.r_multiple, o.result, o.bars_held FROM decisions d "
+             "JOIN decision_outcomes o USING(decision_id) WHERE d.arm LIKE 'basket:%' AND d.status='resolved'")
+    args: tuple = ()
+    if symbol:
+        query += " AND d.symbol=?"
+        args = (symbol,)
+    with store.journal.connect() as db:
+        twins = [dict(r) for r in db.execute(query, args)]
+        origins = {}
+        ids = sorted({json.loads(t["detail"]).get("twin_of") for t in twins} - {None})
+        for start in range(0, len(ids), 500):
+            chunk = ids[start:start + 500]
+            for r in db.execute("SELECT decision_id, r_multiple, result FROM decision_outcomes WHERE decision_id IN (%s)"
+                                % ",".join("?" * len(chunk)), chunk):
+                origins[r["decision_id"]] = dict(r)
+        counts = {}
+        for r in db.execute("SELECT arm, status, COUNT(*) AS n FROM decisions WHERE arm LIKE 'basket:%' GROUP BY arm, status"):
+            counts.setdefault(r["arm"], {})[r["status"]] = r["n"]
+    arms = {}
+    for twin_arm in sorted({t["arm"] for t in twins} | set(counts)):
+        rows = [t for t in twins if t["arm"] == twin_arm]
+        details = [json.loads(t["detail"]) for t in rows]
+        values = [t["r_multiple"] for t in rows]
+        usd = [t["r_multiple"] * d["basket"]["risk_money"] for t, d in zip(rows, details)]
+        pairs = [(t["r_multiple"], origins[d["twin_of"]]["r_multiple"]) for t, d in zip(rows, details)
+                 if d.get("twin_of") in origins]
+        paired = {"n": len(pairs), "mean_r_basket": None, "mean_r_single": None, "difference": None,
+                  "difference_interval": None, "underpowered": len(pairs) < MIN_SAMPLE, "clearly_helps": False, "clearly_hurts": False}
+        if pairs:
+            paired["mean_r_basket"] = round(mean(p[0] for p in pairs), 4)
+            paired["mean_r_single"] = round(mean(p[1] for p in pairs), 4)
+        if len(pairs) >= 2:
+            diffs = [a - b for a, b in pairs]
+            half = NormalDist().inv_cdf(0.975) * stdev(diffs) / sqrt(len(diffs))
+            paired["difference"] = round(mean(diffs), 4)
+            paired["difference_interval"] = [round(mean(diffs) - half, 4), round(mean(diffs) + half, 4)]
+            paired["clearly_helps"] = bool(not paired["underpowered"] and paired["difference_interval"][0] > 0)
+            paired["clearly_hurts"] = bool(not paired["underpowered"] and paired["difference_interval"][1] < 0)
+        last = details[-1]["basket"] if details else {}
+        c = counts.get(twin_arm, {})
+        arms[twin_arm] = {**summarize(values), "arm": twin_arm[len("basket:"):], "positions": last.get("positions"),
+                          "target_usd": last.get("target_usd"), "target_r": last.get("target_r"),
+                          "usd_total": round(sum(usd), 2), "usd_mean": round(mean(usd), 2) if usd else None,
+                          "ended_on": {k: sum(t["result"] == k for t in rows) for k in ("target", "stop", "timeout")},
+                          "still_open": c.get("open", 0), "skipped_open": c.get("skipped_open", 0), "paired": paired}
+    return {"arms": arms,
+            "reading_guide": ("Simulation sur les vraies bougies : le panier ferme en bloc quand son gain atteint la cible ; le "
+                              "risque total du panier est celui d'une position. Le suivi réel se fait toutes les quelques "
+                              "secondes, la simulation bougie par bougie : les résultats réels peuvent différer un peu.")}
+
+
 def performance(store: ResearchStore, symbol: str | None = None) -> dict:
     resolved, counts = _load(store, symbol)
+    # basket twins are reported on their own: they must not widen the multiple-comparison corrections of the real arms
+    resolved = [r for r in resolved if not r["arm"].startswith("basket:")]
+    counts = {arm: c for arm, c in counts.items() if not arm.startswith("basket:")}
     arms = sorted(set(counts) | {r["arm"] for r in resolved})
     sessions = sorted({r["session"] for r in resolved})
     symbols = sorted({r["symbol"] for r in resolved})
@@ -142,7 +198,7 @@ def performance(store: ResearchStore, symbol: str | None = None) -> dict:
         "scope": symbol or "all", "resolved_trades": len(resolved), "arms": by_arm,
         "by_arm_session": by_arm_session, "by_arm_symbol": by_arm_symbol,
         "skills_vs_plain": skills_vs_plain, "forced_vs_random": forced_vs_random, "ai_director_vs": ai_director_vs,
-        "skill_effects": skill_effects,
+        "skill_effects": skill_effects, "basket": basket_performance(store, symbol),
         "direction": direction_performance(store),
         "reading_guide": (
             "R = gain or loss as a multiple of the initial stop distance, after spread. Intervals are widened for the "
@@ -205,7 +261,8 @@ def recent_decisions(store: ResearchStore, limit: int = 60) -> list[dict]:
         rows = db.execute(
             "SELECT d.decision_id, d.at, d.symbol, d.session, d.arm, d.action, d.status, d.detail, "
             "o.result, o.r_multiple FROM decisions d LEFT JOIN decision_outcomes o USING(decision_id) "
-            "WHERE d.action IN ('BUY','SELL') OR d.status='model_failed' ORDER BY d.at DESC, d.arm LIMIT ?",
+            "WHERE (d.action IN ('BUY','SELL') OR d.status='model_failed') AND d.arm NOT LIKE 'basket:%' "
+            "ORDER BY d.at DESC, d.arm LIMIT ?",
             (min(max(limit, 1), 300),))
         result = []
         for row in rows:

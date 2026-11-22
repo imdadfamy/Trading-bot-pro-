@@ -44,7 +44,13 @@ DEFAULT_CONFIG = {
     # instrument: "ignore" (record and show it, the position keeps its stop and target), "close_if_profit" (take the gain)
     # or "close". The opposite position is never opened in the same breath: no blind reversal.
     "opposite_signal_policy": "ignore",
+    # Basket mode (simulation only for now): on these instruments, every BUY/SELL of an execution arm also opens a simulated
+    # basket of identical positions (same stop and target as the single position) that closes as a whole when the basket's
+    # gain reaches target_usd; one basket at a time per instrument and arm. The single-position system is left untouched.
+    "basket": {"symbols": ["Volatility 10 Index"], "positions": 20, "target_usd": 50.0, "simulate": True},
 }
+BASKET_PREFIX = "basket:"
+BASKET_ASSUMED_EQUITY = 10000.0  # only used when the account equity has never been read
 OPPOSITE_POLICIES = ("ignore", "close_if_profit", "close")
 CLOSE_ALL_PHRASE = "FERMER TOUTES LES POSITIONS DEMO"
 CONFIG_LIMITS = {"model_every_minutes": (5, 1440), "horizon_bars": (4, 500), "stop_atr_multiple": (0.5, 10),
@@ -107,6 +113,16 @@ def set_config(store: ResearchStore, patch: dict, *, author: str) -> dict:
         elif key == "execution_arms":
             if not isinstance(item, list) or len(item) > 6 or any(a not in ARM_NAMES for a in item):
                 raise ValueError("execution_arms must be a list of known arms, for example skills:director")
+        elif key == "basket":
+            if (not isinstance(item, dict) or set(item) - set(DEFAULT_CONFIG["basket"])
+                    or not isinstance(item.get("symbols", []), list) or len(item.get("symbols", [])) > 12
+                    or any(not isinstance(s, str) or not 1 <= len(s) <= 60 for s in item.get("symbols", []))
+                    or not isinstance(item.get("simulate", True), bool)):
+                raise ValueError("basket must hold symbols (list), positions, target_usd and simulate (true/false)")
+            for sub, (low, high) in {"positions": (2, 50), "target_usd": (1, 100000)}.items():
+                if sub in item and (isinstance(item[sub], bool) or not isinstance(item[sub], (int, float)) or not low <= item[sub] <= high):
+                    raise ValueError(f"basket.{sub} must be between {low} and {high}")
+            item = {**config.get("basket", DEFAULT_CONFIG["basket"]), **item}
         elif key == "timeframe":
             if item not in TIMEFRAME_SECONDS:
                 raise ValueError("timeframe must be one of " + ", ".join(TIMEFRAME_SECONDS))
@@ -289,6 +305,37 @@ class Autopilot:
                                {"cycle_id": cycle_id, "symbol": symbol, "arm": arm, "action": action, "status": status})
         return decision_id
 
+    # -- basket twin (simulation): the same decision, traded as a basket that closes as a whole on a money target
+    def _basket_risk_money(self) -> tuple[float, bool]:
+        account = json.loads(self.store.state_get("autopilot_account") or "null") or {}
+        equity = float(account.get("equity") or account.get("balance") or 0)
+        assumed = equity <= 0
+        if assumed:
+            equity = BASKET_ASSUMED_EQUITY
+        return equity * float(self.limits_provider().risk_per_trade), assumed
+
+    def _basket_twin(self, cycle_id, symbol, at, arm, action, plan, config, origin_id, origin_status) -> None:
+        basket = config.get("basket") or {}
+        if not basket.get("simulate") or symbol not in basket.get("symbols", []) or arm not in config.get("execution_arms", []):
+            return
+        risk_money, assumed = self._basket_risk_money()
+        target_usd = float(basket["target_usd"])
+        # The basket's total risk is the single position's risk (0.5% of equity by default), so +target_usd is
+        # target_usd / risk_money times the stop distance; the positions' own target (reward_multiple) still applies.
+        target_r = target_usd / risk_money if risk_money > 0 else plan["reward_multiple"]
+        detail = {"variant": "basket",
+                  "rationale": f"basket of {basket['positions']} identical positions, closed together at +{target_usd:g} USD (simulation)",
+                  "twin_of": origin_id if origin_status == "open" else None,
+                  "basket": {"positions": basket["positions"], "target_usd": target_usd, "risk_money": round(risk_money, 2),
+                             "target_r": round(target_r, 4), "equity_assumed": assumed}}
+        twin_arm = BASKET_PREFIX + arm
+        if self._has_open(symbol, twin_arm):  # one basket at a time: the next one starts only once this one is closed
+            status = "skipped_open"
+        else:
+            status = "open"
+            detail["plan"] = {**plan, "reward_multiple": round(min(plan["reward_multiple"], target_r), 6)}
+        self._record(cycle_id, symbol, at, twin_arm, action, status, detail)
+
     def _has_open(self, symbol, arm) -> bool:
         with self.store.journal.connect() as db:
             return db.execute("SELECT 1 FROM decisions WHERE symbol=? AND arm=? AND status='open' LIMIT 1",
@@ -433,6 +480,8 @@ class Autopilot:
                     status, detail = "open", {**detail, "plan": plan}
                 decision_id = self._record(cycle_id, symbol, last.closed_at, arm, action.value, status, detail)
                 summary["arms"][arm] = f"{action.value}/{status}"
+                if action != Action.WAIT and plan is not None:
+                    self._basket_twin(cycle_id, symbol, last.closed_at, arm, action.value, plan, config, decision_id, status)
                 if scored and action != Action.WAIT and plan is not None:
                     with self.store.journal.connect() as db:
                         db.execute("INSERT OR IGNORE INTO direction_pending VALUES(?,?,?,?,?,?)",
