@@ -177,6 +177,23 @@ class BasketWatchTests(Base):
         self.assertEqual((len(baskets), baskets[0]["members"], baskets[0]["total"], baskets[0]["target_usd"]), (1, 4, 4.0, 10.0))
 
 
+class PositionsViewTests(BasketWatchTests):
+    def test_a_basket_is_one_line_with_its_members_total_and_target(self):
+        from trading_pro.service import Service
+        fake, executor, pilot, report = self.make([1.0, 2.0, 3.0, 1.5])
+        self.store.state_set("autopilot_positions", json.dumps({"at": NOW.isoformat(), "positions": executor.positions_snapshot()}))
+        self.store.record_order(decision_id="solo", symbol="XAUUSD", arm="det:graph", side="SELL", state="open", opened_at=NOW,
+                                volume=0.1, position_ticket=99)
+        view = Service(str(Path(self.folder.name) / "t.db")).positions_view()
+        baskets = [p for p in view["positions"] if p.get("basket")]
+        self.assertEqual(len(view["positions"]), 2)  # one line for the basket, one for the single position
+        self.assertEqual(len(baskets), 1)
+        line = baskets[0]
+        self.assertEqual((line["basket"]["members"], line["basket"]["target_usd"], line["profit"], line["basket"]["total"]), (4, 10.0, 7.5, 7.5))
+        self.assertAlmostEqual(line["volume"], sum(p.volume for p in fake.positions), places=4)
+        self.assertEqual(view["floating_profit"], 7.5)  # counted once, not once per member
+
+
 class BasketRoutingTests(unittest.TestCase):
     def run_cycle(self, basket):
         with tempfile.TemporaryDirectory() as temp:

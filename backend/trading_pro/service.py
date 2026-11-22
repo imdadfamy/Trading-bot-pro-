@@ -141,7 +141,7 @@ class Service:
         snap = json.loads(self.store.state_get("autopilot_positions") or "null") or {}
         live = {p.get("ticket"): p for p in snap.get("positions", [])}
         now = datetime.now(timezone.utc)
-        rows = []
+        rows, baskets = [], {}
         for o in self.store.open_orders():
             p = live.get(o["position_ticket"], {})
             left = None
@@ -150,11 +150,29 @@ class Service:
             conflict = json.loads(self.store.state_get(f"autopilot_conflict:{o['symbol']}") or "null")
             if conflict and conflict.get("ticket") != o["position_ticket"]:
                 conflict = None
-            rows.append({"symbol": o["symbol"], "arm": o["arm"], "side": o["side"], "volume": o["volume"],
-                         "entry": p.get("price_open", o["entry"]), "price_current": p.get("price_current"),
-                         "profit": p.get("profit"), "stop_loss": o["stop_loss"], "take_profit": o["take_profit"],
-                         "opened_at": o["opened_at"], "seconds_left": left, "max_age_seconds": o["max_age_seconds"],
-                         "live": bool(p), "conflict": conflict})
+            row = {"symbol": o["symbol"], "arm": o["arm"], "side": o["side"], "volume": o["volume"],
+                   "entry": p.get("price_open", o["entry"]), "price_current": p.get("price_current"),
+                   "profit": p.get("profit"), "stop_loss": o["stop_loss"], "take_profit": o["take_profit"],
+                   "opened_at": o["opened_at"], "seconds_left": left, "max_age_seconds": o["max_age_seconds"],
+                   "live": bool(p), "conflict": conflict}
+            if o.get("basket_id"):
+                baskets.setdefault(o["basket_id"], []).append((p, row))
+            else:
+                rows.append(row)
+        for basket_id, members in baskets.items():  # a basket is shown as ONE line: its members move together
+            first = members[0][1]
+            meta = json.loads(self.store.state_get(f"basket:{basket_id}") or "null") or {}
+            floating = [p["profit"] for p, _ in members if isinstance(p.get("profit"), (int, float))]
+            lefts = [r["seconds_left"] for _, r in members if r["seconds_left"] is not None]
+            realised = self.store.basket_realised(basket_id)
+            running = round(sum(floating), 2) if floating else None
+            entries = [r["entry"] for _, r in members if isinstance(r["entry"], (int, float))]
+            rows.append({**first, "volume": round(sum(r["volume"] or 0 for _, r in members), 4),
+                         "entry": round(sum(entries) / len(entries), 5) if entries else None, "profit": running,
+                         "seconds_left": min(lefts) if lefts else None, "live": all(bool(p) for p, _ in members),
+                         "basket": {"id": basket_id, "members": len(members), "target_usd": meta.get("target_usd"),
+                                    "realised": round(realised, 2), "total": round(realised + (running or 0), 2)}})
+        rows.sort(key=lambda r: r["opened_at"])
         profits = [r["profit"] for r in rows if isinstance(r["profit"], (int, float))]
         return {"at": snap.get("at"), "positions": rows, "floating_profit": round(sum(profits), 2) if profits else None,
                 "close_requested": bool(self.store.state_get("autopilot_close_request"))}

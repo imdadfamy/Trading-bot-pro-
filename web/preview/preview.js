@@ -74,6 +74,7 @@ function labeled(container, values) { const section=node("div","stats"); for (co
 function friendly(error) {
   const text = String(error && error.message ? error.message : error);
   if (text.includes("Operator authentication")) return "Clé opérateur manquante ou incorrecte : copie-la depuis la fenêtre noire ouverte par Lancer-Application.bat (elle change à chaque lancement) et colle-la dans le champ « Clé opérateur ».";
+  if (text.startsWith("basket")) return "Réglage du panier refusé : le nombre de positions doit être entre 2 et 50, le gain cible entre 1 et 100 000 $, et les instruments une liste de noms.";
   if (text.includes("Confirmation phrase")) return "Phrase de confirmation absente ou fausse : recopie-la exactement.";
   return text;
 }
@@ -401,12 +402,13 @@ function duration(seconds) {
 }
 const POLICY_TEXT = { ignore: "ignorer (la position garde son stop)", close_if_profit: "fermer si la position est en gain", close: "fermer la position" };
 const CONFLICT_RESULT = { ignored: "ignoré", closed: "position fermée" };
+function positionCount(list) { return list.reduce((n, p) => n + (p.basket ? p.basket.members : 1), 0); }
 function positionsCard(data) {
   const list = data.positions || [];
   const panel = card("Positions ouvertes");
   const head = node("div", "pos-head");
   const total = typeof data.floating_profit === "number" ? `${signed(data.floating_profit)} $` : "—";
-  const left = node("div"); append(left, node("div", `big ${tone(data.floating_profit)}`, list.length ? `${list.length} position${list.length > 1 ? "s" : ""} · ${total}` : "Aucune position ouverte"),
+  const left = node("div"); append(left, node("div", `big ${tone(data.floating_profit)}`, list.length ? `${positionCount(list)} position${positionCount(list) > 1 ? "s" : ""}${list.some(p => p.basket) ? ` dont ${list.filter(p => p.basket).length} panier${list.filter(p => p.basket).length > 1 ? "s" : ""}` : ""} · ${total}` : "Aucune position ouverte"),
     node("div", "sub", list.length ? "Résultat en cours (non encore réalisé), lu chez le courtier toutes les 10 secondes. Chaque position a son stop et son objectif chez le courtier." : "Les ordres automatiques apparaissent ici dès qu'ils sont pris."));
   const close = node("button", "danger wide", data.close_requested ? "Fermeture en cours…" : "Fermer toutes les positions");
   close.type = "button"; close.disabled = !list.length || !!data.close_requested;
@@ -414,10 +416,10 @@ function positionsCard(data) {
   append(head, left, close); append(panel, head);
   list.forEach(p => {
     const item = node("div", "posn");
-    const who = node("div", "who"); append(who, node("strong", "", p.symbol), node("span", `chip ${p.side === "BUY" ? "buy" : "sell"}`, `${ACT_SHORT[p.side] || p.side} · ${value(p.volume)} lot`));
+    const who = node("div", "who"); append(who, node("strong", "", p.symbol), node("span", `chip ${p.side === "BUY" ? "buy" : "sell"}`, `${ACT_SHORT[p.side] || p.side} · ${value(p.volume)} lot${p.basket ? ` · panier de ${p.basket.members}` : ""}`));
     const first = node("div"); append(first, who, node("small", "", `${armName(p.arm)} · ouverte ${when(p.opened_at)}`));
     const price = node("div"); append(price, node("div", "big", typeof p.price_current === "number" ? num(p.price_current) : "—"), node("small", "", `entrée ${num(p.entry)}${p.live ? "" : " · cours en attente"}`));
-    const gain = node("div"); append(gain, node("div", `big ${tone(p.profit)}`, typeof p.profit === "number" ? `${signed(p.profit)} $` : "—"), node("small", "", "résultat en cours"));
+    const gain = node("div"); append(gain, node("div", `big ${tone(p.profit)}`, typeof p.profit === "number" ? `${signed(p.profit)} $` : "—"), node("small", "", p.basket ? `panier : ${signed(p.basket.total)} $ sur +${num(p.basket.target_usd)} $ visés${p.basket.realised ? ` (dont ${signed(p.basket.realised)} $ déjà encaissés)` : ""}` : "résultat en cours"));
     const levels = node("div"); append(levels, node("div", "levels", `stop ${num(p.stop_loss)} · objectif ${num(p.take_profit)}`),
       node("small", "", p.seconds_left === null || p.seconds_left === undefined ? "pas de délai de fermeture" : (p.seconds_left < 0 ? `délai dépassé de ${duration(-p.seconds_left)} : fermeture au prochain contrôle` : `fermeture automatique dans ${duration(p.seconds_left)}`)));
     if (typeof p.seconds_left === "number" && p.max_age_seconds) { const bar = node("div", "left"), fill = node("i"); setStyle(fill, { width: Math.max(0, Math.min(100, 100 - p.seconds_left / p.max_age_seconds * 100)) + "%" }); bar.appendChild(fill); levels.appendChild(bar); }
@@ -531,6 +533,7 @@ async function generic(page,sequence) {
     (data.blocked_gates||[]).forEach(id=>{const g=(L?.gates||{})[id]||[id,""];append(gates,row([g[0],g[1]]));});append(content,gates);
   }
 }
+function checkLabel(text,checked) {const label=node("label","check");const box=node("input");box.type="checkbox";box.checked=!!checked;append(label,box,node("span","",text));return [label,box];}
 function formLabel(text,type,valueNow) {const label=node("label","",text);const input=node("input");input.type=type;input.value=valueNow??"";append(label,input);return [label,input];}
 function settingsPage() {
   append(content,info("Les clés des fournisseurs restent côté serveur. La clé opérateur saisie ici n’est pas enregistrée."));
@@ -585,11 +588,30 @@ function settingsPage() {
     for(const [field,label,type] of [["timeframe","Durée des bougies (M1, M5, M15, M30, H1)","text"],["model_every_minutes","Consultation de l'IA toutes les (minutes)","number"],["horizon_bars","Durée maximale d'une position simulée (bougies)","number"],["stop_atr_multiple","Stop simulé (multiple de la volatilité ATR)","number"],["reward_multiple","Objectif simulé (multiple du risque)","number"],["skill_pack_size","Compétences données à chaque analyste","number"],["execution_arms","Méthodes dont les avis deviennent des ordres démo (séparées par des virgules ; ex. skills:director, forced:director, det:graph)","text"],["opposite_signal_policy","Signal contraire pendant qu'une position est ouverte : ignore, close_if_profit (fermer si en gain) ou close (fermer)","text"]]){
       const current=Array.isArray(cfg[field])?cfg[field].join(", "):cfg[field];const [box,input]=formLabel(label,type,current);if(type==="number")input.step="any";fields[field]=input;append(group,box);
     }
+    // basket mode: several identical positions opened together and closed together at a money target
+    const bk=cfg.basket||{};const basketBox=node("div","symbol-checks basket-box");
+    append(basketBox,node("div","label","Mode panier (positions groupées, fermées ensemble à un gain cible)"),
+      node("small","","Un panier ouvre plusieurs positions identiques en même temps, chacune avec son stop et son objectif comme d'habitude, et les ferme toutes quand leur total atteint le gain cible. Le risque total du panier est celui d'une position (partagé entre elles). Un seul panier à la fois par instrument. Compte démo uniquement."));
+    const basketPick=node("div","pick");const basketOn=new Set(bk.symbols||[]);
+    const basketChecks=known.map(name=>{const l=node("label","check");const c=node("input");c.type="checkbox";c.checked=basketOn.has(name);c.dataset.symbol=name;append(l,c,node("span","",name));append(basketPick,l);return c;});
+    const [simLabel,simBox]=checkLabel("Panier simulé : comparer, sans aucun ordre, le panier à la position seule (page Agents IA)",bk.simulate!==false);
+    const [realLabel,realBox]=checkLabel("Panier RÉEL sur le compte démo : remplace l'ordre simple sur les instruments cochés ci-dessus",!!bk.enabled);
+    const basketFlags=node("div","pick");append(basketFlags,simLabel,realLabel);
+    const [posLabel,posInput]=formLabel("Nombre de positions par panier (2 à 50)","number",bk.positions??20);
+    const [tgtLabel,tgtInput]=formLabel("Gain cible du panier en dollars","number",bk.target_usd??50);tgtInput.step="any";
+    const basketNums=node("div","form-group");append(basketNums,posLabel,tgtLabel);
+    append(basketBox,node("div","label","Instruments du panier"),basketPick,basketFlags,basketNums);
+    append(group,basketBox);
     const save=node("button","","Enregistrer les réglages des agents");
     save.addEventListener("click",async()=>{
       const patch={symbols:fields.symbols.value.split(",").map(s=>s.trim()).filter(Boolean),timeframe:fields.timeframe.value.trim(),execution_arms:fields.execution_arms.value.split(",").map(s=>s.trim()).filter(Boolean),opposite_signal_policy:fields.opposite_signal_policy.value.trim()};
       for(const f of ["model_every_minutes","horizon_bars","stop_atr_multiple","reward_multiple","skill_pack_size"])patch[f]=Number(fields[f].value);
       if(!patch.symbols.length){pilotNote.textContent="Coche au moins un instrument à analyser.";return;}
+      patch.basket={symbols:basketChecks.filter(c=>c.checked).map(c=>c.dataset.symbol),positions:Number(posInput.value),target_usd:Number(tgtInput.value),simulate:simBox.checked,enabled:realBox.checked};
+      if(patch.basket.enabled&&!bk.enabled){
+        if(!patch.basket.symbols.length){pilotNote.textContent="Coche au moins un instrument pour le panier réel.";return;}
+        if(typeof confirm==="function"&&!confirm(`Activer le panier RÉEL (compte démo) ? Chaque décision d'achat ou de vente sur ${patch.basket.symbols.join(", ")} ouvrira ${patch.basket.positions} positions, fermées ensemble à +${patch.basket.target_usd} $. Les ordres automatiques doivent aussi être activés.`))return;
+      }
       try{await get("/autopilot/config",{method:"PATCH",headers:{"X-Operator-Key":agentKey.value||keyInput.value,"X-Operator-Name":"preview-local","Content-Type":"application/json"},body:JSON.stringify(patch)});pilotNote.textContent="Réglages enregistrés. Ils sont pris en compte au prochain cycle d'analyse.";}catch(error){pilotNote.textContent=friendly(error);}
     });
     append(pilotForm,group,save,pilotNote);

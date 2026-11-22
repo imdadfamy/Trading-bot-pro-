@@ -80,6 +80,7 @@ async function run() {
   const message = vm.runInContext('friendly(new Error("Operator authentication required"))', context);
   assert.match(message, /Clé opérateur manquante ou incorrecte/);
   assert.match(vm.runInContext('friendly(new Error("autre chose"))', context), /autre chose/);
+  assert.match(vm.runInContext('friendly(new Error("basket.positions must be between 2 and 50"))', context), /Réglage du panier refusé/);
   console.log("Navigation locale : réponses obsolètes ignorées.");
 }
 run().catch(error => { console.error(error); process.exitCode = 1; });
