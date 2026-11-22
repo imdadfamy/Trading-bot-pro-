@@ -230,6 +230,7 @@ class CycleTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             provider = FakeProvider()
             store, pilot, _ = build(temp, {"XAUUSD": rising("XAUUSD")}, provider)
+            autopilot.set_config(store, {"model_variants": ["plain", "skills", "forced"], "exit_study": {"enabled": False}}, author="t")
             result = pilot.run_symbol("XAUUSD")
             self.assertEqual(result["status"], "ok")
             by_arm = {d["arm"]: d for d in decisions(store)}
@@ -254,6 +255,7 @@ class CycleTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             provider = FakeProvider()
             store, pilot, _ = build(temp, {"XAUUSD": rising("XAUUSD")}, provider)
+            autopilot.set_config(store, {"model_variants": ["plain", "skills", "forced"], "exit_study": {"enabled": False}}, author="t")
             pilot.run_symbol("XAUUSD")
             plain = [c for c in provider.calls if "features" not in c[1] and c[0] != "director"]
             skilled = [c for c in provider.calls if "features" in c[1] and not c[1].get("forced_direction")]
@@ -273,6 +275,7 @@ class CycleTests(unittest.TestCase):
     def test_failed_model_calls_are_recorded_as_failures_and_never_as_analyses(self):
         with tempfile.TemporaryDirectory() as temp:
             store, pilot, _ = build(temp, {"XAUUSD": rising("XAUUSD")}, FakeProvider(fail=True))
+            autopilot.set_config(store, {"model_variants": ["plain", "skills", "forced"], "exit_study": {"enabled": False}}, author="t")
             pilot.run_symbol("XAUUSD")
             by_arm = {d["arm"]: d for d in decisions(store)}
             for arm in ("plain:graph", "plain:quant", "skills:graph", "plain:director", "skills:director"):

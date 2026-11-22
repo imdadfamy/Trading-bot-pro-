@@ -134,11 +134,62 @@ def basket_performance(store: ResearchStore, symbol: str | None = None) -> dict:
                               "secondes, la simulation bougie par bougie : les résultats réels peuvent différer un peu.")}
 
 
+def exit_performance(store: ResearchStore, symbol: str | None = None) -> dict:
+    """Horizon and target compared on the SAME entries: every variant is followed from the same decision."""
+    query = ("SELECT d.cycle_id, d.arm, d.detail, o.r_multiple, o.result, o.bars_held FROM decisions d "
+             "JOIN decision_outcomes o USING(decision_id) WHERE d.arm LIKE 'exit:%' AND d.status='resolved'")
+    args: tuple = ()
+    if symbol:
+        query += " AND d.symbol=?"
+        args = (symbol,)
+    with store.journal.connect() as db:
+        rows = [dict(r) for r in db.execute(query, args)]
+    from .autopilot import get_config
+    config = get_config(store)
+    baseline = (int(config.get("horizon_bars", 48)), float(config.get("reward_multiple", 2.0)))
+    by_base: dict[str, dict[tuple, dict]] = {}
+    for row in rows:
+        detail = json.loads(row["detail"])
+        key = (detail["exit"]["horizon_bars"], detail["exit"]["reward_multiple"])
+        entry = by_base.setdefault(detail["twin_arm"], {}).setdefault(key, {"by_cycle": {}, "rows": []})
+        entry["by_cycle"][row["cycle_id"]] = row["r_multiple"]
+        entry["rows"].append(row)
+    out = {}
+    for base, variants in by_base.items():
+        reference = variants.get(baseline) or variants.get(max(variants, key=lambda k: len(variants[k]["by_cycle"])))
+        used = baseline if baseline in variants else None
+        z_comparisons = max(len(variants) - 1, 1)
+        table = []
+        for (horizon, reward), data in sorted(variants.items()):
+            values = [r["r_multiple"] for r in data["rows"]]
+            ended = {k: sum(r["result"] == k for r in data["rows"]) for k in ("target", "stop", "timeout")}
+            paired = {"n": 0, "difference": None, "difference_interval": None, "underpowered": True,
+                      "clearly_better": False, "clearly_worse": False}
+            if data is not reference:
+                diffs = [r - reference["by_cycle"][c] for c, r in data["by_cycle"].items() if c in reference["by_cycle"]]
+                paired["n"] = len(diffs)
+                if len(diffs) >= 2:
+                    half = NormalDist().inv_cdf(1 - 0.025 / z_comparisons) * stdev(diffs) / sqrt(len(diffs))
+                    paired.update(difference=round(mean(diffs), 4),
+                                  difference_interval=[round(mean(diffs) - half, 4), round(mean(diffs) + half, 4)],
+                                  underpowered=len(diffs) < MIN_SAMPLE)
+                    paired["clearly_better"] = bool(not paired["underpowered"] and paired["difference_interval"][0] > 0)
+                    paired["clearly_worse"] = bool(not paired["underpowered"] and paired["difference_interval"][1] < 0)
+            table.append({"horizon_bars": horizon, "reward_multiple": reward, "baseline": data is reference,
+                          **summarize(values, z_comparisons), "ended_on": ended,
+                          "mean_bars_held": round(mean(r["bars_held"] for r in data["rows"]), 1), "paired_vs_baseline": paired})
+        out[base] = {"variants": table, "baseline_is_current_setting": used is not None}
+    return {"arms": out, "baseline": {"horizon_bars": baseline[0], "reward_multiple": baseline[1]},
+            "reading_guide": ("Chaque décision est suivie sous plusieurs délais et objectifs, depuis la MÊME entrée : l'écart est "
+                              "mesuré pair par pair. R est exprimé en distance du stop, donc comparable d'un objectif à l'autre. "
+                              "Les intervalles sont élargis pour le nombre de variantes comparées ; il faut au moins 30 paires.")}
+
+
 def performance(store: ResearchStore, symbol: str | None = None) -> dict:
     resolved, counts = _load(store, symbol)
-    # basket twins are reported on their own: they must not widen the multiple-comparison corrections of the real arms
-    resolved = [r for r in resolved if not r["arm"].startswith("basket:")]
-    counts = {arm: c for arm, c in counts.items() if not arm.startswith("basket:")}
+    # basket and exit-study twins are reported on their own: they must not widen the multiple-comparison corrections
+    resolved = [r for r in resolved if not r["arm"].startswith(("basket:", "exit:"))]
+    counts = {arm: c for arm, c in counts.items() if not arm.startswith(("basket:", "exit:"))}
     arms = sorted(set(counts) | {r["arm"] for r in resolved})
     sessions = sorted({r["session"] for r in resolved})
     symbols = sorted({r["symbol"] for r in resolved})
@@ -172,6 +223,11 @@ def performance(store: ResearchStore, symbol: str | None = None) -> dict:
         if plain or skilled:
             skills_vs_plain[agent] = _difference(skilled, plain, 4)
     random_values = group("random", "coin")
+    skills_effect_forced = {}  # forced with the skills against forced without them: what the skills add
+    for agent in ("graph", "quant", "news", "director"):
+        with_skills, without = group("forced", agent), group("plainforced", agent)
+        if with_skills or without:
+            skills_effect_forced[agent] = _difference(with_skills, without, 4)
     forced_vs_random = {}
     for agent in ("graph", "quant", "news", "director"):
         forced = group("forced", agent)
@@ -198,7 +254,8 @@ def performance(store: ResearchStore, symbol: str | None = None) -> dict:
         "scope": symbol or "all", "resolved_trades": len(resolved), "arms": by_arm,
         "by_arm_session": by_arm_session, "by_arm_symbol": by_arm_symbol,
         "skills_vs_plain": skills_vs_plain, "forced_vs_random": forced_vs_random, "ai_director_vs": ai_director_vs,
-        "skill_effects": skill_effects, "basket": basket_performance(store, symbol),
+        "skill_effects": skill_effects, "basket": basket_performance(store, symbol), "exit_study": exit_performance(store, symbol),
+        "skills_effect_forced": skills_effect_forced,
         "direction": direction_performance(store),
         "reading_guide": (
             "R = gain or loss as a multiple of the initial stop distance, after spread. Intervals are widened for the "
@@ -230,8 +287,13 @@ def direction_performance(store: ResearchStore) -> dict:
     if values("ai:director"):
         out["ai_director_vs"] = {"vs_vote": _difference(values("ai:director"), values("skills:director"), 2),
                                  "vs_coin": _difference(values("ai:director"), values("random:coin"), 2)}
+    out["skills_effect_forced"], out["plainforced_vs_random"] = {}, {}
     for agent in ("graph", "quant", "news", "director"):
         plain, skilled, forced = values(f"plain:{agent}"), values(f"skills:{agent}"), values(f"forced:{agent}")
+        if forced or values(f"plainforced:{agent}"):
+            out["skills_effect_forced"][agent] = _difference(forced, values(f"plainforced:{agent}"), 4)
+        if values(f"plainforced:{agent}"):
+            out["plainforced_vs_random"][agent] = _difference(values(f"plainforced:{agent}"), values("random:coin"), 4)
         if plain or skilled:
             out["skills_vs_plain"][agent] = _difference(skilled, plain, 4)
         if forced or values("random:coin"):
@@ -261,7 +323,7 @@ def recent_decisions(store: ResearchStore, limit: int = 60) -> list[dict]:
         rows = db.execute(
             "SELECT d.decision_id, d.at, d.symbol, d.session, d.arm, d.action, d.status, d.detail, "
             "o.result, o.r_multiple FROM decisions d LEFT JOIN decision_outcomes o USING(decision_id) "
-            "WHERE (d.action IN ('BUY','SELL') OR d.status='model_failed') AND d.arm NOT LIKE 'basket:%' "
+            "WHERE (d.action IN ('BUY','SELL') OR d.status='model_failed') AND d.arm NOT LIKE 'basket:%' AND d.arm NOT LIKE 'exit:%' "
             "ORDER BY d.at DESC, d.arm LIMIT ?",
             (min(max(limit, 1), 300),))
         result = []

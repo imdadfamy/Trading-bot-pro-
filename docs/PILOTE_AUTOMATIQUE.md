@@ -79,3 +79,6 @@ Un ordinateur en veille ne fait **rien** : ni application locale, ni MetaTrader.
 
 ## Mode panier (Volatility 10)
 Réglage `basket` : instruments, nombre de positions (20), cible en dollars (50), `simulate` (jumeau simulé, vrai par défaut) et `enabled` (vrais ordres démo en panier, FAUX par défaut). Un panier ouvre N positions identiques ensemble (le risque d'une position est réparti entre elles), chacune avec son stop et son objectif chez le courtier, et le pilote les ferme toutes quand le total atteint la cible. Tout ou rien à l'ouverture, un seul panier à la fois par instrument, un panier compte pour une position dans les limites. Voir la Décision 070 pour le détail et les limites.
+
+## Mesures sans risque : instruments tradés, compétences, délai et objectif
+`traded_symbols` sépare les instruments analysés (pour apprendre) de ceux qui reçoivent de vrais ordres. `model_variants` choisit les variantes d'analystes ; « plainforced » (forcé sans compétences) se compare à « forced » (forcé avec compétences). `exit_study` suit chaque décision de méthodes choisies sous plusieurs délais et objectifs depuis la même entrée, en simulation. Voir la Décision 073.

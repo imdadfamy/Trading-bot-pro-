@@ -196,7 +196,8 @@ class Service:
                                      "ORDER BY at DESC LIMIT 1", (symbol, arm)).fetchone()
                     if row:
                         votes[role] = dict(row)
-                shadow_open = db.execute("SELECT COUNT(*) FROM decisions WHERE symbol=? AND status='open'", (symbol,)).fetchone()[0]
+                shadow_open = db.execute("SELECT COUNT(*) FROM decisions WHERE symbol=? AND status='open' AND arm NOT LIKE 'basket:%' "
+                                         "AND arm NOT LIKE 'exit:%'", (symbol,)).fetchone()[0]
                 real = [dict(r) for r in db.execute(
                     "SELECT side, volume, entry, stop_loss, take_profit, opened_at FROM auto_orders "
                     "WHERE symbol=? AND state='open'", (symbol,))]

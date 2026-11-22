@@ -74,6 +74,9 @@ function labeled(container, values) { const section=node("div","stats"); for (co
 function friendly(error) {
   const text = String(error && error.message ? error.message : error);
   if (text.includes("Operator authentication")) return "Clé opérateur manquante ou incorrecte : copie-la depuis la fenêtre noire ouverte par Lancer-Application.bat (elle change à chaque lancement) et colle-la dans le champ « Clé opérateur ».";
+  if (text.startsWith("exit_study")) return "Étude des sorties refusée : méthodes connues, délais de 4 à 300 bougies (5 au plus), objectifs de 0,5 à 10 fois le stop (5 au plus).";
+  if (text.startsWith("model_variants")) return "Variantes d'analystes refusées : choisis parmi skills, forced, plainforced, plain, sans doublon.";
+  if (text.startsWith("traded_symbols")) return "Instruments tradés refusés : une liste de noms d'instruments.";
   if (text.startsWith("instrument_risk")) return "Risque ou lot par instrument refusé : le risque d'un ordre simple va de 0,05 % à 5 % du capital et le lot doit être positif.";
   if (text.startsWith("basket")) return "Réglage du panier refusé : le nombre de positions doit être entre 2 et 50, le gain cible entre 1 et 100 000 $, et les instruments une liste de noms.";
   if (text.includes("Confirmation phrase")) return "Phrase de confirmation absente ou fausse : recopie-la exactement.";
@@ -332,6 +335,30 @@ function performanceCards(perf) {
     `avec ${e.n_with} positions (R ${num(e.mean_r_with)}) · sans ${e.n_without} (R ${num(e.mean_r_without)}) · écart ${num(e.difference)}`,
     e.clearly_helps ? "AIDE" : e.clearly_hurts ? "NUIT" : e.underpowered ? "TROP PEU DE DONNÉES" : "INCERTAIN"])));
   out.push(skills);
+  const forcedFx = (perf.direction && perf.direction.observations && Object.keys(perf.direction.skills_effect_forced || {}).length) ? perf.direction.skills_effect_forced : (perf.skills_effect_forced || {});
+  const forcedKeys = Object.entries(forcedFx);
+  if (forcedKeys.length) {
+    const fx = card("Les compétences aident-elles ? (même question forcée, avec et sans compétences)");
+    append(fx, info("Les deux variantes doivent répondre achat ou vente à chaque consultation, sur les mêmes données. La seule différence : l'une reçoit les indicateurs calculés et les compétences, l'autre non. C'est la mesure directe de ce que les compétences ajoutent."));
+    forcedKeys.forEach(([agent, d]) => append(fx, row([role(agent),
+      `avec compétences : ${num(d.mean_r_with)} (${d.n_with}) · sans : ${num(d.mean_r_without)} (${d.n_without})${d.difference_interval ? ` · écart ${num(d.difference)} [${num(d.difference_interval[0])} ; ${num(d.difference_interval[1])}]` : ""}`,
+      d.clearly_helps ? "LES COMPÉTENCES AIDENT" : d.clearly_hurts ? "LES COMPÉTENCES NUISENT" : d.underpowered ? "TROP PEU DE DONNÉES" : "INDISTINGUABLE"])));
+    out.push(fx);
+  }
+  const exitArms = Object.entries(((perf.exit_study || {}).arms) || {});
+  if (exitArms.length) {
+    const exitCard = card("Étude des sorties : quel délai et quel objectif ?");
+    append(exitCard, info(`Chaque décision est suivie sous plusieurs délais (en bougies) et objectifs (en multiples du stop), depuis la MÊME entrée, sur les vraies bougies. R est exprimé en distance du stop, donc comparable. La référence est le réglage actuel (${perf.exit_study.baseline.horizon_bars} bougies, ${perf.exit_study.baseline.reward_multiple} fois le stop). Les intervalles sont élargis pour le nombre de variantes ; il faut au moins 30 paires. Simulation : aucun ordre.`));
+    exitArms.forEach(([base, data]) => {
+      append(exitCard, node("div", "label", armName(base)));
+      data.variants.forEach(v => { const p = v.paired_vs_baseline || {};
+        append(exitCard, row([`${v.horizon_bars} bougies · objectif ${num(v.reward_multiple)} × le stop${v.baseline ? " (réglage actuel)" : ""}`,
+          `${v.trades} suivi${v.trades > 1 ? "s" : ""} (objectif ${v.ended_on.target} · stop ${v.ended_on.stop} · délai ${v.ended_on.timeout}) · R moyen ${num(v.mean_r)} · réussite ${pct(v.win_rate)} · durée moyenne ${num(v.mean_bars_held)} bougies` +
+          (!v.baseline && p.n ? ` · contre la référence : ${p.difference_interval ? `écart ${num(p.difference)} [${num(p.difference_interval[0])} ; ${num(p.difference_interval[1])}]` : `${p.n} pair${p.n > 1 ? "es" : "e"}`}` : ""),
+          v.baseline ? "RÉFÉRENCE" : p.clearly_better ? "MEILLEUR QUE LA RÉFÉRENCE" : p.clearly_worse ? "PIRE QUE LA RÉFÉRENCE" : (p.underpowered || v.small_sample) ? "TROP PEU DE DONNÉES" : "INDISTINGUABLE"])); });
+    });
+    out.push(exitCard);
+  }
   const basketArms = Object.entries((perf.basket || {}).arms || {});
   if (basketArms.length) {
     const basketCard = card("Panier en simulation contre position seule");
@@ -586,7 +613,12 @@ function settingsPage() {
     const [extraLabel,extra]=formLabel("Autre instrument (nom exact, séparés par des virgules)","text","");
     fields.symbols={get value(){return [...checks.filter(c=>c.checked).map(c=>c.dataset.symbol),...extra.value.split(",").map(s=>s.trim()).filter(Boolean)].join(",");}};
     append(symbolBox,symbolList,extraLabel);append(pilotForm,symbolBox);
-    for(const [field,label,type] of [["timeframe","Durée des bougies (M1, M5, M15, M30, H1)","text"],["model_every_minutes","Consultation de l'IA toutes les (minutes)","number"],["horizon_bars","Durée maximale d'une position simulée (bougies)","number"],["stop_atr_multiple","Stop simulé (multiple de la volatilité ATR)","number"],["reward_multiple","Objectif simulé (multiple du risque)","number"],["skill_pack_size","Compétences données à chaque analyste","number"],["execution_arms","Méthodes dont les avis deviennent des ordres démo (séparées par des virgules ; ex. skills:director, forced:director, det:graph)","text"],["opposite_signal_policy","Signal contraire pendant qu'une position est ouverte : ignore, close_if_profit (fermer si en gain) ou close (fermer)","text"]]){
+    // which analysed instruments may receive REAL orders: the others are analysed and simulated only (the learning goes on)
+    const tradeBox=node("div","symbol-checks");append(tradeBox,node("div","label","Instruments sur lesquels des ordres peuvent partir (les autres sont analysés et simulés seulement)"));
+    const tradeList=node("div","pick");const tradedNow=new Set(cfg.traded_symbols==null?[...analysed]:cfg.traded_symbols);
+    const tradeChecks=known.map(name=>{const l=node("label","check");const c=node("input");c.type="checkbox";c.checked=tradedNow.has(name);c.dataset.symbol=name;append(l,c,node("span","",name));append(tradeList,l);return c;});
+    append(tradeBox,tradeList,node("small","","Décocher un instrument ici ne l'empêche pas d'être analysé : les données continuent de s'accumuler, mais aucun ordre réel ni panier n'y part."));append(pilotForm,tradeBox);
+    for(const [field,label,type] of [["timeframe","Durée des bougies (M1, M5, M15, M30, H1)","text"],["model_variants","Variantes d'analystes consultées (skills, forced, plainforced, plain : séparées par des virgules)","text"],["model_every_minutes","Consultation de l'IA toutes les (minutes)","number"],["horizon_bars","Durée maximale d'une position simulée (bougies)","number"],["stop_atr_multiple","Stop simulé (multiple de la volatilité ATR)","number"],["reward_multiple","Objectif simulé (multiple du risque)","number"],["skill_pack_size","Compétences données à chaque analyste","number"],["execution_arms","Méthodes dont les avis deviennent des ordres démo (séparées par des virgules ; ex. skills:director, forced:director, det:graph)","text"],["opposite_signal_policy","Signal contraire pendant qu'une position est ouverte : ignore, close_if_profit (fermer si en gain) ou close (fermer)","text"]]){
       const current=Array.isArray(cfg[field])?cfg[field].join(", "):cfg[field];const [box,input]=formLabel(label,type,current);if(type==="number")input.step="any";fields[field]=input;append(group,box);
     }
     // basket mode: several identical positions opened together and closed together at a money target
@@ -625,6 +657,14 @@ function settingsPage() {
       append(instGrid,node("div","inst-name",name),r.sRisk,r.sLot,r.bPos,r.bTarget,r.bRisk,r.bLot);return r;});
     const instScroll=node("div","inst-scroll");append(instScroll,instGrid);append(instBox,instScroll);append(group,instBox);
     const pct=i=>i.value.trim()===""?null:Number(i.value)/100;const plain=i=>i.value.trim()===""?null:Number(i.value);
+    const ex=cfg.exit_study||{};const exitBox=node("div","symbol-checks basket-box");
+    append(exitBox,node("div","label","Étude des sorties (simulation : délai et objectif)"),
+      node("small","","Chaque achat ou vente des méthodes choisies est aussi suivi, sur les vraies bougies, sous plusieurs délais et objectifs depuis la même entrée. Résultats sur la page Agents IA. Aucun ordre."));
+    const [exOnLabel,exOn]=checkLabel("Étude des sorties active",ex.enabled!==false);const exOnWrap=node("div","pick");append(exOnWrap,exOnLabel);
+    const [exArmsLabel,exArms]=formLabel("Méthodes suivies (ex. forced:director, forced:quant)","text",(ex.arms||[]).join(", "));
+    const [exHLabel,exH]=formLabel("Délais en bougies (4 à 300, jusqu'à 5)","text",(ex.horizons||[]).join(", "));
+    const [exRLabel,exR]=formLabel("Objectifs en multiples du stop (0,5 à 10, jusqu'à 5)","text",(ex.rewards||[]).join(", "));
+    const exGrid=node("div","form-group");append(exGrid,exArmsLabel,exHLabel,exRLabel);append(exitBox,exOnWrap,exGrid);append(group,exitBox);
     const save=node("button","","Enregistrer les réglages des agents");
     save.addEventListener("click",async()=>{
       const patch={symbols:fields.symbols.value.split(",").map(s=>s.trim()).filter(Boolean),timeframe:fields.timeframe.value.trim(),execution_arms:fields.execution_arms.value.split(",").map(s=>s.trim()).filter(Boolean),opposite_signal_policy:fields.opposite_signal_policy.value.trim()};
@@ -632,6 +672,11 @@ function settingsPage() {
       if(!patch.symbols.length){pilotNote.textContent="Coche au moins un instrument à analyser.";return;}
       patch.basket={symbols:basketChecks.filter(c=>c.checked).map(c=>c.dataset.symbol),positions:Number(posInput.value),target_usd:Number(tgtInput.value),simulate:simBox.checked,enabled:realBox.checked,
         risk_per_trade:pct(bRisk),max_open_risk:pct(bCap),fixed_lot:plain(bLot),max_spread:plain(bSpread),per_symbol:{}};
+      patch.model_variants=fields.model_variants.value.split(",").map(s=>s.trim()).filter(Boolean);
+      const tradedPicked=tradeChecks.filter(c=>c.checked).map(c=>c.dataset.symbol);const analysedPicked=new Set(patch.symbols);
+      patch.traded_symbols=(tradedPicked.length===analysedPicked.size&&tradedPicked.every(s=>analysedPicked.has(s)))?null:tradedPicked;
+      const list=i=>i.value.split(",").map(s=>s.trim()).filter(Boolean);
+      patch.exit_study={enabled:exOn.checked,arms:list(exArms),horizons:list(exH).map(Number),rewards:list(exR).map(Number)};
       patch.instrument_risk={};
       instRows.forEach(r=>{
         const single={};if(pct(r.sRisk)!==null)single.risk_per_trade=pct(r.sRisk);if(plain(r.sLot)!==null)single.fixed_lot=plain(r.sLot);

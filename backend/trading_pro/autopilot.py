@@ -28,8 +28,9 @@ from .store import ResearchStore
 
 MODES = ("off", "observe", "demo_auto")
 DEMO_AUTO_PHRASE = "ACTIVER LES ORDRES AUTOMATIQUES DEMO"
-ARM_NAMES = {"rule:sma_cross", "det:graph", "random:coin", "ai:director", *(f"{v}:{a}" for v in ("plain", "skills", "forced")
-                                                           for a in ("graph", "quant", "news", "director"))}
+MODEL_VARIANTS = ("plain", "skills", "forced", "plainforced")  # plainforced = forced BUY/SELL answer, without features or skills
+ARM_NAMES = {"rule:sma_cross", "det:graph", "random:coin", "ai:director", *(f"{v}:{a}" for v in MODEL_VARIANTS
+                                                                         for a in ("graph", "quant", "news", "director"))}
 TIMEFRAME_SECONDS = {"M1": 60, "M5": 300, "M15": 900, "M30": 1800, "H1": 3600}
 DEFAULT_CONFIG = {
     "symbols": ["Volatility 10 Index", "Boom 500 Index", "Crash 500 Index", "Drift Switch Index 10",
@@ -57,7 +58,18 @@ DEFAULT_CONFIG = {
     # Per-instrument risk of the SINGLE order (anything left out follows the general risk settings): risk_per_trade (a share of
     # the capital) or fixed_lot (the lot of one position, which wins over the risk).
     "instrument_risk": {},
+    # Which analyst variants are consulted. "plain" (no skills, free to abstain) answered WAIT 191 times out of 191 and never produced a
+    # trade, so it is off by default; "plainforced" replaces it as the no-skills baseline: same forced BUY/SELL rule as "forced",
+    # without the features and skills, so forced against plainforced measures what the skills add. "skills" feeds the AI director.
+    "model_variants": ["skills", "forced", "plainforced"],
+    # Instruments that may receive REAL orders (single or basket). None = every analysed instrument. The others are analysed and
+    # simulated only, so the learning goes on everywhere while the money is exposed where the operator chose.
+    "traded_symbols": None,
+    # Exit study (simulation only): each BUY/SELL of these arms is also followed on the real bars with every combination of
+    # horizon (in bars) and target (multiple of the stop), on the SAME entry, so the exit rules can be compared pair by pair.
+    "exit_study": {"enabled": True, "arms": ["forced:director"], "horizons": [24, 48, 96], "rewards": [1.0, 1.5, 2.0]},
 }
+EXIT_PREFIX = "exit:"
 BASKET_LIMITS = {"risk_per_trade": (0.0005, 0.10), "max_open_risk": (0.0005, 0.25), "fixed_lot": (0.0001, 100000),
                  "max_spread": (0, 100000), "positions": (2, 50), "target_usd": (1, 100000)}
 INSTRUMENT_LIMITS = {"risk_per_trade": (0.0005, 0.05), "fixed_lot": (0.0001, 100000)}
@@ -183,6 +195,25 @@ def set_config(store: ResearchStore, patch: dict, *, author: str) -> dict:
                            for s, v in per_symbol.items())):
                 raise ValueError("basket.per_symbol must map instrument names to positions, target_usd, risk_per_trade, fixed_lot within their limits")
             item = {**config.get("basket", DEFAULT_CONFIG["basket"]), **item}
+        elif key == "model_variants":
+            if not isinstance(item, list) or not 1 <= len(item) <= len(MODEL_VARIANTS) or any(v not in MODEL_VARIANTS for v in item) \
+                    or len(set(item)) != len(item):
+                raise ValueError("model_variants must be a non-empty list of: " + ", ".join(MODEL_VARIANTS))
+        elif key == "traded_symbols":
+            if item is not None and (not isinstance(item, list) or len(item) > 12
+                                     or any(not isinstance(s, str) or not 1 <= len(s) <= 60 for s in item)):
+                raise ValueError("traded_symbols must be empty (all analysed instruments) or a list of instrument names")
+        elif key == "exit_study":
+            if (not isinstance(item, dict) or set(item) - set(DEFAULT_CONFIG["exit_study"])
+                    or not isinstance(item.get("enabled", True), bool)
+                    or not isinstance(item.get("arms", []), list) or len(item.get("arms", [])) > 4
+                    or any(a not in ARM_NAMES for a in item.get("arms", []))
+                    or not isinstance(item.get("horizons", []), list) or not 1 <= len(item.get("horizons", [4])) <= 5
+                    or any(isinstance(h, bool) or not isinstance(h, int) or not 4 <= h <= 300 for h in item.get("horizons", []))
+                    or not isinstance(item.get("rewards", []), list) or not 1 <= len(item.get("rewards", [1])) <= 5
+                    or any(isinstance(r, bool) or not isinstance(r, (int, float)) or not 0.5 <= r <= 10 for r in item.get("rewards", []))):
+                raise ValueError("exit_study must hold enabled, arms (known arms), horizons (4 to 300 bars, at most 5) and rewards (0.5 to 10, at most 5)")
+            item = {**config.get("exit_study", DEFAULT_CONFIG["exit_study"]), **item}
         elif key == "instrument_risk":
             if (not isinstance(item, dict) or len(item) > 24
                     or any(not isinstance(s, str) or not 1 <= len(s) <= 60 or not _spec_ok(v, INSTRUMENT_LIMITS, INSTRUMENT_LIMITS)
@@ -403,6 +434,19 @@ class Autopilot:
             detail["plan"] = {**plan, "reward_multiple": round(min(plan["reward_multiple"], target_r), 6)}
         self._record(cycle_id, symbol, at, twin_arm, action, status, detail)
 
+    def _exit_twins(self, cycle_id, symbol, at, arm, action, plan, config) -> None:
+        """Follow the SAME entry under every horizon and target of the exit study (simulation only, paired by construction)."""
+        study = config.get("exit_study") or {}
+        if not study.get("enabled") or arm not in study.get("arms", []):
+            return
+        for horizon in study.get("horizons", []):
+            for reward in study.get("rewards", []):
+                twin_arm = f"{EXIT_PREFIX}{arm}:h{int(horizon)}:r{float(reward):g}"
+                detail = {"variant": "exit", "twin_arm": arm, "exit": {"horizon_bars": int(horizon), "reward_multiple": float(reward)},
+                          "rationale": f"same entry as {arm}, horizon {int(horizon)} bars, target {float(reward):g} x the stop (simulation)",
+                          "plan": {**plan, "horizon_bars": int(horizon), "reward_multiple": float(reward)}}
+                self._record(cycle_id, symbol, at, twin_arm, action, "open", detail)
+
     def _has_open(self, symbol, arm) -> bool:
         with self.store.journal.connect() as db:
             return db.execute("SELECT 1 FROM decisions WHERE symbol=? AND arm=? AND status='open' LIMIT 1",
@@ -549,6 +593,7 @@ class Autopilot:
                 summary["arms"][arm] = f"{action.value}/{status}"
                 if action != Action.WAIT and plan is not None:
                     self._basket_twin(cycle_id, symbol, last.closed_at, arm, action.value, plan, config, decision_id, status)
+                    self._exit_twins(cycle_id, symbol, last.closed_at, arm, action.value, plan, config)
                 if scored and action != Action.WAIT and plan is not None:
                     with self.store.journal.connect() as db:
                         db.execute("INSERT OR IGNORE INTO direction_pending VALUES(?,?,?,?,?,?)",
@@ -627,6 +672,10 @@ class Autopilot:
     # -- automatic demo orders
     def _execute_arms(self, symbol, cycle_id, plan, step, config, summary, now) -> None:
         """Send the decision of the first execution arm that opened a BUY/SELL this cycle. One order per symbol."""
+        traded = config.get("traded_symbols")
+        if traded is not None and symbol not in traded:
+            summary["orders"] = {"all": "analysed only"}  # analysed and simulated here, no real order on this instrument
+            return
         with self.store.journal.connect() as db:
             rows = {r["arm"]: dict(r) for r in db.execute(
                 "SELECT decision_id, arm, action, detail FROM decisions WHERE cycle_id=? "
@@ -845,7 +894,8 @@ class Autopilot:
             return
         summary["models"] = "ran"
         skills_reports: dict[str, Report] = {}
-        for variant in ("plain", "skills", "forced"):
+        variants = [v for v in config.get("model_variants", DEFAULT_CONFIG["model_variants"]) if v in MODEL_VARIANTS]
+        for variant in variants:
             answers: dict[str, Action] = {}
             used: list[str] = []
             for agent in voters:
@@ -853,9 +903,9 @@ class Autopilot:
                                       closed_prices=closes, headlines=headlines)
                 tag = prompt_tag(agent)
                 pack = {"skills": [], "sha256": ""}
-                if variant in ("skills", "forced"):
-                    if variant == "forced":
-                        inputs["forced_direction"] = True  # same inputs and skills as the skills arm; only the answer rule differs
+                if variant in ("forced", "plainforced"):
+                    inputs["forced_direction"] = True  # only the answer rule differs: always BUY or SELL, never WAIT
+                if variant in ("skills", "forced"):  # forced = the skills arm's inputs and skills; plainforced has neither
                     inputs["features"] = numeric
                     if agent == "news":
                         inputs["scheduled_us_announcements"] = upcoming
@@ -890,8 +940,9 @@ class Autopilot:
                 summary["arms"][arm] = "WAIT/model_failed"
             else:
                 propose(arm, action, detail)
-        self._ai_director(setup, symbol, cycle_id, last, plan, numeric, upcoming, skills_reports, baselines or {}, config,
-                          propose, summary, budget)
+        if "skills" in variants:  # the AI director reads the skills analysts' reports
+            self._ai_director(setup, symbol, cycle_id, last, plan, numeric, upcoming, skills_reports, baselines or {}, config,
+                              propose, summary, budget)
 
 
 FAILURE_RATIONALES = {

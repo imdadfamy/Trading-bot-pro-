@@ -222,6 +222,10 @@
     "forced:quant": "Analyste quantitatif IA, direction forcée",
     "forced:news": "Veilleur IA, direction forcée",
     "forced:director": "Directeur IA, direction forcée",
+    "plainforced:graph": "Analyste graphique, direction forcée, sans compétences",
+    "plainforced:quant": "Analyste quantitatif, direction forcée, sans compétences",
+    "plainforced:news": "Analyste actualités, direction forcée, sans compétences",
+    "plainforced:director": "Directeur par vote, direction forcée, sans compétences",
     "ai:director": "Directeur IA (lit tous les rapports)"
   },
   "decisionStatus": {
