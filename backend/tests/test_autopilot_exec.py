@@ -149,10 +149,10 @@ class SendTests(Base):
         refused = [e for e in self.store.journal.events(80) if e["kind"] == "autopilot.order_refused"]
         self.assertEqual(len(refused), len(cases) + 1)
 
-    def test_a_zero_spread_limit_means_ten_percent_of_the_stop_whatever_the_price_scale(self):
-        ok = AutoMT5(spread=0.29)  # 0.29 is under 10% of the 3.0 stop
+    def test_a_zero_spread_limit_means_twenty_percent_of_the_stop_whatever_the_price_scale(self):
+        ok = AutoMT5(spread=0.55)  # 0.55 is under 20% of the 3.0 stop (0.60)
         self.assertEqual(self.send(ok, decision_id="a1", limits=Limits(max_spread=0.0))["state"], "open")
-        costly = AutoMT5(spread=0.45)
+        costly = AutoMT5(spread=0.65)
         report = self.send(costly, decision_id="a2", limits=Limits(max_spread=0.0))
         self.assertEqual((report["state"], report["code"]), ("refused", "risk"))
         self.assertIn("Spread too wide", report["message"])

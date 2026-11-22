@@ -33,6 +33,7 @@ from .mt5_status import ReadOnlyMT5, connect_demo
 DEAL_OUT = (1, 2, 3)  # DEAL_ENTRY_OUT, INOUT, OUT_BY
 REASONS = {0: "terminal", 1: "mobile", 2: "web", 3: "programme", 4: "stop", 5: "objectif", 6: "appel de marge"}
 MAX_TICK_AGE_SECONDS = 15.0
+AUTO_SPREAD_SHARE = 0.20  # automatic spread ceiling, as a share of the stop (the stop is ~10 median spreads: 10% refused half the quotes)
 CLOCK_SKEW_SECONDS = 90.0  # a broker clock may run slightly fast or slow; a live, advancing tick within this band is fresh
 LIVE_WAIT_SECONDS = 4.0
 
@@ -256,8 +257,8 @@ class Executor:
                                     float(info.volume_max), float(info.volume_step),
                                     float(risk.get("commission_per_lot", 0.0)), slippage_ticks)
             fixed = risk.get("fixed_lot")
-            # Spreads live on very different price scales: 0 means automatic, a spread of at most 10% of the stop.
-            ceiling = limits.max_spread if limits.max_spread > 0 else 0.10 * distance
+            # Spreads live on very different price scales: 0 means automatic, a spread of at most 20% of the stop.
+            ceiling = limits.max_spread if limits.max_spread > 0 else AUTO_SPREAD_SHARE * distance
             effective = replace(limits, max_spread=ceiling)
             if fixed:
                 effective = replace(effective, risk_per_trade=limits.max_open_risk)

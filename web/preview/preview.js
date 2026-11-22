@@ -542,7 +542,7 @@ function settingsPage() {
       const capLabel=node("label","","Limiter le budget IA (décoché : aucun plafond, la dépense reste mesurée)");const capBox=node("input");capBox.type="checkbox";capBox.checked=settings.ai_cap_enabled!==false;append(capLabel,capBox);append(controls,capLabel);
       const risk=settings.risk||{};const riskInputs={};
       const riskGroup=node("div","form-group");
-      for(const [field,label,scale] of [["risk_per_trade","Risque par position (% du capital)",100],["max_daily_loss","Perte maximale par jour (% du capital)",100],["max_open_risk","Risque ouvert cumulé maximal (%)",100],["max_positions","Positions simultanées maximales",1],["max_spread","Écart d'achat-vente maximal (unités de prix ; 0 = automatique : 10 % du stop)",1],["fixed_lot","Lot fixe (vide = calculé d'après le risque)",1],["commission_per_lot","Commission aller-retour par lot",1],["slippage_ticks","Glissement supposé (ticks)",1]]){
+      for(const [field,label,scale] of [["risk_per_trade","Risque par position (% du capital)",100],["max_daily_loss","Perte maximale par jour (% du capital)",100],["max_open_risk","Risque ouvert cumulé maximal (%)",100],["max_positions","Positions simultanées maximales",1],["max_spread","Écart d'achat-vente maximal (unités de prix ; 0 = automatique : 20 % du stop)",1],["fixed_lot","Lot fixe (vide = calculé d'après le risque)",1],["commission_per_lot","Commission aller-retour par lot",1],["slippage_ticks","Glissement supposé (ticks)",1]]){
         const raw=risk[field];const shown=(raw===null||raw===undefined)?"":Math.round(raw*scale*10000)/10000;
         const [box,input]=formLabel(label,"number",shown);input.step="any";input.min="0";riskInputs[field]=[input,scale];append(riskGroup,box);
       }
