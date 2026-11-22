@@ -46,7 +46,7 @@ class MT5DemoBroker:
         return {"action": mt5.TRADE_ACTION_DEAL, "symbol": signal.symbol,
                 "volume": volume, "type": mt5.ORDER_TYPE_BUY if signal.action == Action.BUY else mt5.ORDER_TYPE_SELL,
                 "price": price, "sl": signal.stop_loss, "tp": signal.take_profit,
-                "deviation": 10, "magic": MAGIC, "comment": signal.signal_id[:31],
+                "deviation": 10, "magic": MAGIC, "comment": signal.signal_id[:28],  # MetaTrader refuses 30+ characters ("Invalid comment argument"); 28 verified
                 "type_time": mt5.ORDER_TIME_GTC, "type_filling": filling}
 
     last_check = None  # raw order_check answer of the latest validation, for diagnostics
@@ -84,7 +84,14 @@ class MT5DemoBroker:
         result = self.mt5.order_check(request)
         self.last_check = result
         if result is None or result.retcode != 0:
-            raise RuntimeError("MT5 order_check rejected")
+            if result is not None:
+                why = f"retcode {result.retcode}: {getattr(result, 'comment', '')}"
+            else:
+                try:
+                    why = f"no answer, last_error {self.mt5.last_error()}"
+                except Exception:  # noqa: BLE001 - a diagnostic must never hide the refusal itself
+                    why = "no answer"
+            raise RuntimeError(f"MT5 order_check rejected ({why})")
         return request
 
     def preflight(self, signal, volume, quote):

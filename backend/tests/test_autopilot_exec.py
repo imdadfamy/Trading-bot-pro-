@@ -94,6 +94,14 @@ class SendTests(Base):
         result = self.send(Skewed())
         self.assertEqual(result["state"], "open")
 
+    def test_the_order_comment_stays_short_enough_for_metatrader(self):
+        # a real decision id is a 36-character uuid; MetaTrader rejects a comment of 30 characters or more
+        import uuid
+        fake = AutoMT5()
+        result = self.send(fake, decision_id=str(uuid.uuid4()))
+        self.assertEqual(result["state"], "open")
+        self.assertLessEqual(len(fake.sent[0]["comment"]), 28)
+
     def test_a_cycle_clock_that_is_already_old_does_not_expire_the_order(self):
         fake = AutoMT5()
         old = utcnow() - timedelta(seconds=40)  # model calls and the MetaTrader connection took a while
