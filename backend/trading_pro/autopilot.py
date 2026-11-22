@@ -44,10 +44,11 @@ DEFAULT_CONFIG = {
     # instrument: "ignore" (record and show it, the position keeps its stop and target), "close_if_profit" (take the gain)
     # or "close". The opposite position is never opened in the same breath: no blind reversal.
     "opposite_signal_policy": "ignore",
-    # Basket mode (simulation only for now): on these instruments, every BUY/SELL of an execution arm also opens a simulated
-    # basket of identical positions (same stop and target as the single position) that closes as a whole when the basket's
-    # gain reaches target_usd; one basket at a time per instrument and arm. The single-position system is left untouched.
-    "basket": {"symbols": ["Volatility 10 Index"], "positions": 20, "target_usd": 50.0, "simulate": True},
+    # Basket mode. simulate: on these instruments every BUY/SELL of an execution arm also opens a SIMULATED basket of
+    # identical positions (same stop and target as the single position) that closes as a whole when its gain reaches
+    # target_usd; one basket at a time per instrument and arm. enabled: the same as REAL demo orders, in place of the single
+    # order on these instruments (off by default). The single-position system is left untouched everywhere else.
+    "basket": {"symbols": ["Volatility 10 Index"], "positions": 20, "target_usd": 50.0, "simulate": True, "enabled": False},
 }
 BASKET_PREFIX = "basket:"
 BASKET_ASSUMED_EQUITY = 10000.0  # only used when the account equity has never been read
@@ -117,8 +118,8 @@ def set_config(store: ResearchStore, patch: dict, *, author: str) -> dict:
             if (not isinstance(item, dict) or set(item) - set(DEFAULT_CONFIG["basket"])
                     or not isinstance(item.get("symbols", []), list) or len(item.get("symbols", [])) > 12
                     or any(not isinstance(s, str) or not 1 <= len(s) <= 60 for s in item.get("symbols", []))
-                    or not isinstance(item.get("simulate", True), bool)):
-                raise ValueError("basket must hold symbols (list), positions, target_usd and simulate (true/false)")
+                    or not isinstance(item.get("simulate", True), bool) or not isinstance(item.get("enabled", False), bool)):
+                raise ValueError("basket must hold symbols (list), positions, target_usd, simulate and enabled (true/false)")
             for sub, (low, high) in {"positions": (2, 50), "target_usd": (1, 100000)}.items():
                 if sub in item and (isinstance(item[sub], bool) or not isinstance(item[sub], (int, float)) or not low <= item[sub] <= high):
                     raise ValueError(f"basket.{sub} must be between {low} and {high}")
@@ -583,12 +584,18 @@ class Autopilot:
                             else "US announcement calendar missing")
                 except ValueError:
                     halt = "US announcement calendar invalid"
+            basket = config.get("basket") or {}
+            as_basket = bool(basket.get("enabled")) and symbol in basket.get("symbols", [])
             try:
-                report = self.executor.send(
-                    self.store, decision_id=row["decision_id"], symbol=symbol, side=row["action"], arm=arm,
-                    plan={**plan, "max_age_seconds": int(plan["horizon_bars"] * step)}, limits=self.limits_provider(),
-                    risk=self.risk_provider(), ai_spend=self.store.costs()["total_usd"], offset_hours=self.offset_hours,
-                    now=now, halt=halt, rationale=json.loads(row["detail"]).get("rationale", ""))
+                options = dict(decision_id=row["decision_id"], symbol=symbol, side=row["action"], arm=arm,
+                               plan={**plan, "max_age_seconds": int(plan["horizon_bars"] * step)}, limits=self.limits_provider(),
+                               risk=self.risk_provider(), ai_spend=self.store.costs()["total_usd"], offset_hours=self.offset_hours,
+                               now=now, halt=halt, rationale=json.loads(row["detail"]).get("rationale", ""))
+                if as_basket:  # a basket of identical positions in place of the single order, all or nothing
+                    report = self.executor.send_basket(self.store, positions=int(basket["positions"]),
+                                                       target_usd=float(basket["target_usd"]), **options)
+                else:
+                    report = self.executor.send(self.store, **options)
             except Exception as exc:  # noqa: BLE001 - an execution problem must never stop the analysis
                 self.store.journal.log("autopilot.error", symbol, {"error": type(exc).__name__, "message": str(exc)[:200]})
                 summary.setdefault("orders", {})[arm] = f"error:{type(exc).__name__}"
@@ -596,6 +603,40 @@ class Autopilot:
             summary.setdefault("orders", {})[arm] = report["state"] + (f":{report['code']}" if report.get("code") else "")
             if report["state"] != "refused":
                 return
+
+    def _members_of(self, order) -> list[dict]:
+        basket_id = order.get("basket_id")
+        if not basket_id:
+            return [order]
+        return [o for o in self.store.open_orders() if o.get("basket_id") == basket_id]
+
+    def check_baskets(self, positions) -> list[str]:
+        """Close a basket as a whole when the money it made (closed members + floating members) reaches its target."""
+        if self.executor is None or not positions:
+            return []
+        groups: dict[str, list[dict]] = {}
+        for order in self.store.open_orders():
+            if order.get("basket_id"):
+                groups.setdefault(order["basket_id"], []).append(order)
+        live = {p.get("ticket"): float(p.get("profit") or 0.0) for p in positions}
+        closed = []
+        for basket_id, members in groups.items():
+            meta = json.loads(self.store.state_get(f"basket:{basket_id}") or "null") or {}
+            target = float(meta.get("target_usd") or 0)
+            if target <= 0:
+                continue
+            total = self.store.basket_realised(basket_id) + sum(live.get(m["position_ticket"], 0.0) for m in members)
+            if total < target:
+                continue
+            with self._lock:
+                result = self.executor.close_tickets(self.store, [m["position_ticket"] for m in members],
+                                                     reason=f"basket target {target:g}")
+            self.store.journal.log("autopilot.basket_target", basket_id, {"symbol": meta.get("symbol"), "total": round(total, 2),
+                                                                         "target": target, "members": len(members),
+                                                                         "close": result.get("status")})
+            if result.get("status") == "sent":
+                closed.append(basket_id)
+        return closed
 
     def _live_profit(self, ticket) -> float | None:
         snap = json.loads(self.store.state_get("autopilot_positions") or "null") or {}
@@ -616,7 +657,9 @@ class Autopilot:
                 continue
             key = f"autopilot_conflict:{symbol}"
             previous = json.loads(self.store.state_get(key) or "null") or {}
-            profit = self._live_profit(order["position_ticket"])
+            members = self._members_of(order)
+            lives = [self._live_profit(m["position_ticket"]) for m in members]
+            profit = None if any(v is None for v in lives) else round(sum(lives), 2)
             conflict = {"at": now.isoformat(), "arm": arm, "signal": row["action"], "position_side": order["side"],
                         "ticket": order["position_ticket"], "decision_id": row["decision_id"], "profit": profit,
                         "policy": config.get("opposite_signal_policy", "ignore"), "action": "ignored"}
@@ -624,8 +667,11 @@ class Autopilot:
             if (policy == "close" or (policy == "close_if_profit" and profit is not None and profit > 0)) \
                     and self.executor is not None and order["position_ticket"]:
                 try:  # called from inside run_symbol, which already holds the pilot's lock (one MT5 user at a time)
-                    result = self.executor.close_position_by_ticket(
-                        self.store, int(order["position_ticket"]), reason=f"{policy}: {arm} says {row['action']}")
+                    reason = f"{policy}: {arm} says {row['action']}"
+                    if order.get("basket_id"):  # a basket is closed as a whole
+                        result = self.executor.close_tickets(self.store, [m["position_ticket"] for m in members], reason=reason)
+                    else:
+                        result = self.executor.close_position_by_ticket(self.store, int(order["position_ticket"]), reason=reason)
                     conflict["action"] = "closed" if result.get("status") == "sent" else f"close_{result.get('status')}"
                 except Exception as exc:  # noqa: BLE001
                     conflict["action"] = f"close_error:{type(exc).__name__}"
@@ -645,16 +691,17 @@ class Autopilot:
         if not self.store.open_orders():
             if self.store.state_get("autopilot_positions"):
                 self.store.state_set("autopilot_positions", json.dumps({"at": now.isoformat(), "positions": []}))
-            return
+            return None
         if not force and self._last_positions is not None and (now - self._last_positions).total_seconds() < 10:
-            return
+            return None
         self._last_positions = now
         with self._lock:
             try:
                 positions = self.executor.positions_snapshot(self.offset_hours)
             except Exception:  # noqa: BLE001 - the interface keeps its last values
-                return
+                return None
         self.store.state_set("autopilot_positions", json.dumps({"at": now.isoformat(), "positions": positions}))
+        return positions
 
     def handle_close_request(self):
         """Execute a 'close everything' request made from the interface (always in this thread: one MT5 user at a time)."""
@@ -797,9 +844,23 @@ def status(store: ResearchStore, now: datetime | None = None) -> dict:
         today = db.execute("SELECT COUNT(*) FROM decisions WHERE at>=?", (now.strftime("%Y-%m-%d"),)).fetchone()[0]
         outcomes = db.execute("SELECT COUNT(*) FROM decision_outcomes").fetchone()[0]
     config = get_config(store)
+    snapshot = json.loads(store.state_get("autopilot_positions") or "null") or {}
+    floating = {p.get("ticket"): float(p.get("profit") or 0.0) for p in snapshot.get("positions", [])}
+    groups: dict[str, list[dict]] = {}
+    for order in store.open_orders():
+        if order.get("basket_id"):
+            groups.setdefault(order["basket_id"], []).append(order)
+    baskets = []
+    for basket_id, members in groups.items():
+        meta = json.loads(store.state_get(f"basket:{basket_id}") or "null") or {}
+        realised = store.basket_realised(basket_id)
+        now_total = realised + sum(floating.get(m["position_ticket"], 0.0) for m in members)
+        baskets.append({"basket_id": basket_id, "symbol": members[0]["symbol"], "side": members[0]["side"],
+                        "members": len(members), "target_usd": meta.get("target_usd"), "total": round(now_total, 2),
+                        "opened_at": members[0]["opened_at"]})
     # every instrument the pilot knows, analysed or not, so a ticked-off one can still be ticked back on
     known = list(dict.fromkeys([*DEFAULT_CONFIG["symbols"], *config["symbols"]]))
-    return {"mode": mode, "active": mode != "off", "config": config, "known_symbols": known,
+    return {"mode": mode, "active": mode != "off", "config": config, "known_symbols": known, "baskets": baskets,
             "alive": age is not None and age < 120, "heartbeat_age_seconds": age,
             "cycles": beat.get("cycles", 0), "errors": beat.get("errors", 0), "last_error": beat.get("last_error"),
             "last_cycle": beat.get("last_cycle", {}), "symbol_status": beat.get("symbol_status", {}),
@@ -848,7 +909,7 @@ class AutopilotRunner:
         self.autopilot.refresh_account()
         try:
             self.autopilot.handle_close_request()
-            self.autopilot.refresh_positions()
+            self.autopilot.check_baskets(self.autopilot.refresh_positions())
         except Exception as exc:  # noqa: BLE001
             store.journal.log("autopilot.error", "positions", {"error": type(exc).__name__, "message": str(exc)[:200]})
         if self.autopilot.executor is not None and (self._last_reconcile is None

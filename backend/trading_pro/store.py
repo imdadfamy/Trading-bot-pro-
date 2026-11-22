@@ -89,6 +89,8 @@ class ResearchStore:
               name TEXT PRIMARY KEY, value TEXT NOT NULL);
             INSERT OR IGNORE INTO operational_state(name,value) VALUES ('kill_switch','true');
             """)
+            if "basket_id" not in [r[1] for r in db.execute("PRAGMA table_info(auto_orders)")]:
+                db.execute("ALTER TABLE auto_orders ADD COLUMN basket_id TEXT")  # additive: older rows keep NULL
 
     def _insert(self, table: str, values: tuple):
         # table is selected only by internal code, never from user input.
@@ -227,13 +229,19 @@ class ResearchStore:
 
     def record_order(self, *, decision_id, symbol, arm, side, state, opened_at, volume=None, ticket=None,
                      position_ticket=None, entry=None, stop_loss=None, take_profit=None, max_age_seconds=None,
-                     detail=None, keep_existing=False) -> None:
+                     detail=None, keep_existing=False, basket_id=None) -> None:
         verb = "INSERT OR IGNORE" if keep_existing else "INSERT OR REPLACE"  # a refusal never overwrites a real order row
         with self.journal.connect() as db:
             db.execute(f"{verb} INTO auto_orders(decision_id,symbol,arm,side,volume,ticket,position_ticket,entry,"
-                       "stop_loss,take_profit,opened_at,max_age_seconds,state,detail) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                       "stop_loss,take_profit,opened_at,max_age_seconds,state,detail,basket_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                        (decision_id, symbol, arm, side, volume, ticket, position_ticket, entry, stop_loss, take_profit,
-                        opened_at.isoformat(), max_age_seconds, state, json.dumps(detail or {}, default=str)))
+                        opened_at.isoformat(), max_age_seconds, state, json.dumps(detail or {}, default=str), basket_id))
+
+    def basket_realised(self, basket_id: str) -> float:
+        """Money already booked by the members of a basket that are closed (a partial basket keeps counting them)."""
+        with self.journal.connect() as db:
+            return float(db.execute("SELECT COALESCE(SUM(profit),0) FROM auto_orders WHERE basket_id=? AND state='closed'",
+                                    (basket_id,)).fetchone()[0])
 
     def open_orders(self) -> list[dict]:
         with self.journal.connect() as db:

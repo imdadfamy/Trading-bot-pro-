@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import time
+import uuid
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, ROUND_DOWN
@@ -102,6 +103,21 @@ class Executor:
         return [p for p in positions if getattr(p, "magic", None) == MAGIC]
 
     @staticmethod
+    def _slots(mine, store, exclude=frozenset()) -> int:
+        """Positions counted against the limit: a basket of identical positions takes ONE slot, not one per member."""
+        basket_of = {o["position_ticket"]: o.get("basket_id") for o in store.open_orders()}
+        singles, baskets = 0, set()
+        for position in mine:
+            ticket = getattr(position, "ticket", None)
+            if ticket in exclude:
+                continue
+            if basket_of.get(ticket):
+                baskets.add(basket_of[ticket])
+            else:
+                singles += 1
+        return singles + len(baskets)
+
+    @staticmethod
     def _open_risk(mt5, positions, equity, max_open_risk) -> float:
         total = 0.0
         for p in positions:
@@ -182,21 +198,88 @@ class Executor:
 
     # ------------------------------------------------------------------ sending
     def send(self, store, *, decision_id: str, symbol: str, side: str, arm: str, plan: dict, limits: Limits, risk: dict,
-             ai_spend: float, offset_hours: float, now: datetime, halt: str | None, rationale: str = "") -> dict:
+             ai_spend: float, offset_hours: float, now: datetime, halt: str | None, rationale: str = "",
+             basket: dict | None = None) -> dict:
         """One attempt for one decision. Returns a report; never raises for a refusal."""
         try:
             return self._send(store, decision_id=decision_id, symbol=symbol, side=side, arm=arm, plan=plan,
                               limits=limits, risk=risk, ai_spend=ai_spend, offset_hours=offset_hours, now=now,
-                              halt=halt, rationale=rationale)
+                              halt=halt, rationale=rationale, basket=basket)
         except Refused as refusal:
             store.record_order(decision_id=decision_id, symbol=symbol, arm=arm, side=side, state="refused",
-                               detail={"code": refusal.code, "message": str(refusal)}, opened_at=now, keep_existing=True)
+                               detail={"code": refusal.code, "message": str(refusal)}, opened_at=now, keep_existing=True,
+                               basket_id=basket["id"] if basket else None)
             store.journal.log("autopilot.order_refused", decision_id,
                               {"symbol": symbol, "arm": arm, "code": refusal.code, "message": str(refusal)[:200]})
             return {"state": "refused", "code": refusal.code, "message": str(refusal)}
 
+    def send_basket(self, store, *, decision_id: str, symbol: str, side: str, arm: str, plan: dict, limits: Limits,
+                    risk: dict, ai_spend: float, offset_hours: float, now: datetime, halt: str | None, rationale: str = "",
+                    positions: int, target_usd: float) -> dict:
+        """Open ``positions`` identical positions in a row, ALL OR NOTHING; the pilot closes them together at ``target_usd``.
+
+        Every member goes through the whole chain of ``send`` (stop on entries, demo account, live quote, risk engine with
+        the basket's risk split between its members, broker check, stop and target at the broker, protection check). If a
+        member fails, the ones already open are closed at once and the basket is cancelled. A member with an unknown
+        outcome arms the emergency stop as usual and the members already open keep their broker-side protection.
+        """
+        basket = {"id": decision_id, "n": int(positions), "tickets": [], "target_usd": float(target_usd)}
+        store.state_set(f"basket:{decision_id}", json.dumps({"symbol": symbol, "arm": arm, "side": side, "positions": int(positions),
+                                                             "target_usd": float(target_usd), "at": now.isoformat()}))
+        opened = []
+        failure = None
+        for index in range(int(positions)):
+            member = str(uuid.uuid5(uuid.UUID(decision_id), f"basket-{index}"))  # distinct, stable ids: a retry is a duplicate
+            report = self.send(store, decision_id=member, symbol=symbol, side=side, arm=arm, plan=plan, limits=limits,
+                               risk=risk, ai_spend=ai_spend, offset_hours=offset_hours, now=now, halt=halt,
+                               rationale=rationale, basket=basket)
+            if report.get("state") == "open" and report.get("ticket"):
+                basket["tickets"].append(int(report["ticket"]))
+                opened.append(report)
+                continue
+            failure = report
+            break
+        if failure is None:
+            store.journal.log("autopilot.basket_opened", decision_id, {"symbol": symbol, "arm": arm, "side": side,
+                                                                      "positions": len(opened), "target_usd": float(target_usd)})
+            return {"state": "open", "ticket": opened[0]["ticket"], "members": len(opened), "basket_id": decision_id,
+                    "volume": round(sum(r["volume"] for r in opened), 4)}
+        if not opened:  # the first member was refused: nothing happened, exactly like a single order
+            return {**failure, "members": 0}
+        if failure.get("state") == "uncertain":  # the emergency stop is armed; what is open stays protected at the broker
+            store.journal.log("autopilot.basket_partial", decision_id, {"symbol": symbol, "open": len(opened)})
+            return {**failure, "state": "basket_partial", "members": len(opened)}
+        result = self.close_tickets(store, basket["tickets"], reason="basket cancelled")
+        store.add_alert("basket_cancelled", f"Panier annulé sur {symbol} : {len(opened)} position(s) ouverte(s) puis fermée(s) "
+                        f"({failure.get('code') or failure.get('state')}).")
+        store.journal.log("autopilot.basket_cancelled", decision_id, {"symbol": symbol, "opened": len(opened),
+                                                                     "reason": failure.get("code") or failure.get("state"),
+                                                                     "close": result.get("status")})
+        return {"state": "basket_cancelled", "code": failure.get("code"), "message": failure.get("message", ""),
+                "members": len(opened)}
+
+    def close_tickets(self, store, tickets, *, reason: str) -> dict:
+        """Close several positions of this project at market through ONE connection (a basket reaching its target)."""
+        mt5, _ = self._connect()
+        try:
+            wanted = set(int(t) for t in tickets)
+            sent = missing = failed = 0
+            for position in self._ours(mt5):
+                if getattr(position, "ticket", None) not in wanted:
+                    continue
+                if self._close(mt5, position).get("status") == "sent":
+                    sent += 1
+                else:
+                    failed += 1
+            missing = len(wanted) - sent - failed
+            store.journal.log("autopilot.basket_close", reason[:60], {"requested": len(wanted), "sent": sent,
+                                                                      "failed": failed, "not_open": missing})
+            return {"status": "sent" if failed == 0 else "partial", "sent": sent, "failed": failed, "not_open": missing}
+        finally:
+            mt5.shutdown()
+
     def _send(self, store, *, decision_id, symbol, side, arm, plan, limits, risk, ai_spend, offset_hours, now, halt,
-              rationale) -> dict:
+              rationale, basket=None) -> dict:
         if store.killed():
             raise Refused("stopped", "The stop on new entries is active")
         if store.journal.intent(decision_id) is not None:  # idempotence: one decision, one attempt, ever
@@ -219,7 +302,8 @@ class Executor:
             if not getattr(info, "visible", False):
                 mt5.symbol_select(symbol, True)
             mine = self._ours(mt5)
-            if any(p.symbol == symbol for p in mine):
+            members = set(basket["tickets"]) if basket else set()  # positions of the basket being opened are not "in the way"
+            if any(p.symbol == symbol and getattr(p, "ticket", None) not in members for p in mine):
                 raise Refused("position_open", f"A position of the project is already open on {symbol}")
             offset = offset_hours * 3600
             # The cycle's clock is a few seconds old by now (model calls, connection): the quote's age is measured against
@@ -257,13 +341,16 @@ class Executor:
                                     float(info.volume_max), float(info.volume_step),
                                     float(risk.get("commission_per_lot", 0.0)), slippage_ticks)
             fixed = risk.get("fixed_lot")
+            if basket:  # the basket carries the risk (or fixed lot) of one position, split between its members
+                fixed = fixed / basket["n"] if fixed else fixed
+                limits = replace(limits, risk_per_trade=limits.risk_per_trade / basket["n"])
             # Spreads live on very different price scales: 0 means automatic, a spread of at most 20% of the stop.
             ceiling = limits.max_spread if limits.max_spread > 0 else AUTO_SPREAD_SHARE * distance
             effective = replace(limits, max_spread=ceiling)
             if fixed:
                 effective = replace(effective, risk_per_trade=limits.max_open_risk)
-            state = RiskState(equity, daily_start, open_risk, len(mine), ai_spend, killed=False, broker_connected=True,
-                              demo_account=True)
+            state = RiskState(equity, daily_start, open_risk, self._slots(mine, store, members), ai_spend, killed=False,
+                              broker_connected=True, demo_account=True)
             decision = check_risk(signal, quote, instrument, state, effective, now)
             if not decision.approved:
                 raise Refused("risk", f"Risk engine refused: {decision.reason}")
@@ -297,7 +384,7 @@ class Executor:
                 state_name = "uncertain" if error is not None or (result or {}).get("status") == "uncertain" else "rejected"
                 store.record_order(decision_id=decision_id, symbol=symbol, arm=arm, side=side, volume=volume,
                                    state=state_name, entry=price, stop_loss=stop, take_profit=target, opened_at=now,
-                                   detail={"error": error, "result": result})
+                                   detail={"error": error, "result": result}, basket_id=basket["id"] if basket else None)
                 if state_name == "uncertain":  # never resend, never continue blindly
                     store.set_killed()
                     store.add_alert("order_uncertain", f"Résultat incertain sur {symbol} ({arm}) : vérifier MetaTrader. "
@@ -313,7 +400,8 @@ class Executor:
             store.record_order(decision_id=decision_id, symbol=symbol, arm=arm, side=side, volume=volume,
                                ticket=ticket, position_ticket=ticket, state="open", entry=price, stop_loss=stop,
                                take_profit=target, opened_at=now, max_age_seconds=int(plan["max_age_seconds"]),
-                               detail={"reconciliation": str(report["reconciliation"])[:200]})
+                               detail={"reconciliation": str(report["reconciliation"])[:200]},
+                               basket_id=basket["id"] if basket else None)
             store.journal.log("autopilot.order_sent", decision_id,
                               {"symbol": symbol, "arm": arm, "side": side, "volume": volume, "ticket": ticket})
             protected = self._verify_protection(mt5, store, symbol=symbol, ticket=ticket, decision_id=decision_id)
