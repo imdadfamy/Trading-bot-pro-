@@ -94,6 +94,13 @@ class SendTests(Base):
         result = self.send(Skewed())
         self.assertEqual(result["state"], "open")
 
+    def test_a_cycle_clock_that_is_already_old_does_not_expire_the_order(self):
+        fake = AutoMT5()
+        old = utcnow() - timedelta(seconds=40)  # model calls and the MetaTrader connection took a while
+        result = self.executor(fake).send(self.store, decision_id="late", symbol="XAUUSD", side="BUY", arm="a", plan=PLAN,
+                                          limits=Limits(), risk=RISK, ai_spend=0, offset_hours=0.0, now=old, halt=None)
+        self.assertEqual(result["state"], "open")
+
     def test_a_frozen_quote_is_still_refused_whatever_the_clock_says(self):
         class Frozen(AutoMT5):  # same skew, but the feed does not move: a closed market or a dead connection
             def symbol_info_tick(self, name):

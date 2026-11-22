@@ -26,7 +26,7 @@ from decimal import Decimal, ROUND_DOWN
 
 from .autopilot_features import has_family_word
 from .broker import MAGIC, MT5DemoBroker, execute_demo, reconcile_demo_ticket
-from .core import Action, Instrument, Limits, RiskState, Signal, Snapshot, check_risk
+from .core import Action, Instrument, Limits, RiskState, Signal, Snapshot, check_risk, utcnow
 from .mt5_send import SEND_ALLOWED
 from .mt5_status import ReadOnlyMT5, connect_demo
 
@@ -221,7 +221,11 @@ class Executor:
             if any(p.symbol == symbol for p in mine):
                 raise Refused("position_open", f"A position of the project is already open on {symbol}")
             offset = offset_hours * 3600
+            # The cycle's clock is a few seconds old by now (model calls, connection): the quote's age is measured against
+            # the present, and the broker layer insists on a quote and a signal stamped within seconds of the send.
+            now = max(now, utcnow())
             tick, _ = self._fresh_tick(mt5, symbol, offset, now)
+            now = max(now, utcnow())  # the liveness wait may have taken a few seconds more
             equity = float(getattr(account, "equity", None) or getattr(account, "balance", 0))
             daily_start = self._daily_start_equity(mt5, account, now, offset)
             open_risk = self._open_risk(mt5, mine, equity, limits.max_open_risk)
