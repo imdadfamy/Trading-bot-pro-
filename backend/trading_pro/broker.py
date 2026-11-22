@@ -99,9 +99,13 @@ class MT5DemoBroker:
         return True
 
     def send(self, signal, volume, quote):
-        if not self.demo_execution_enabled:
-            raise RuntimeError("MT5 demo execution is disabled by default")
-        request = self._checked_request(signal, volume, quote)  # refresh account, tick and order_check just before send
+        try:
+            if not self.demo_execution_enabled:
+                raise RuntimeError("MT5 demo execution is disabled by default")
+            request = self._checked_request(signal, volume, quote)  # refresh account, tick and order_check just before send
+        except Exception as exc:
+            # order_send was never reached: the order is certainly NOT at the broker (a moved quote is not an unknown outcome)
+            raise NotSent(str(exc)) from exc
         result = self.mt5.order_send(request)
         if result is None:
             raise RuntimeError("MT5 send outcome unknown; reconcile before retry")
@@ -149,6 +153,10 @@ class MT5DemoBroker:
         return {"status": "unresolved", "ticket": ticket, "deal_tickets": []}
 
 
+class NotSent(RuntimeError):
+    """The final validation before ``order_send`` failed: nothing reached the broker, so there is nothing to reconcile."""
+
+
 def execute_demo(signal: Signal, decision, quote, broker, journal: Journal):
     if signal.action == Action.WAIT or not decision.approved or signal.status != "validated":
         raise ValueError("Only approved validated non-WAIT signals may be sent")
@@ -179,6 +187,10 @@ def execute_demo(signal: Signal, decision, quote, broker, journal: Journal):
                                   ticket=result.get("ticket"), detail=str(result))
         journal.log("order.result", signal.signal_id, result)
         return result
+    except NotSent as exc:
+        journal.transition_intent(signal.signal_id, {"sending"}, "preflight_rejected", detail=str(exc))
+        journal.log("order.preflight_rejected", signal.signal_id, {"error": str(exc), "phase": "before_send"})
+        raise
     except Exception as exc:
         if journal.intent(signal.signal_id)["state"] == "sending":
             journal.transition_intent(signal.signal_id, {"sending"}, "uncertain", detail=str(exc))

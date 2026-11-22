@@ -80,7 +80,8 @@ class Journal:
         """A stale worker cannot overwrite a newer broker observation."""
         allowed = {
             "reserved": {"preflight_rejected", "sending"},
-            "sending": {"uncertain", "accepted", "partial", "rejected", "simulated"},
+            # preflight_rejected from sending: the last check before order_send failed, so nothing was sent
+            "sending": {"uncertain", "accepted", "partial", "rejected", "simulated", "preflight_rejected"},
             "uncertain": {"deals_observed", "order_observed"},
             "accepted": {"deals_observed", "order_observed", "uncertain"},
             "partial": {"deals_observed", "order_observed", "uncertain"},

@@ -94,6 +94,29 @@ class SendTests(Base):
         result = self.send(Skewed())
         self.assertEqual(result["state"], "open")
 
+    def test_a_quote_that_moves_just_before_sending_is_a_refusal_not_an_uncertain_order(self):
+        class Moving(AutoMT5):  # the price jumps after the first order_check, i.e. between the preflight and the final check
+            def symbol_info_tick(self, name):
+                tick = super().symbol_info_tick(name)
+                if self.checked:
+                    tick.bid += 50.0
+                    tick.ask += 50.0
+                return tick
+        fake = Moving()
+        result = self.send(fake)
+        self.assertEqual((result["state"], result["code"]), ("refused", "broker"))
+        self.assertEqual(fake.sent, [])  # order_send was never reached
+        self.assertFalse(self.store.killed())  # a certain non-event must not arm the emergency stop
+        self.assertEqual(self.store.journal.intent("d1")["state"], "preflight_rejected")
+        self.assertEqual(self.store.order_summary()["by_state"].get("uncertain"), None)
+
+    def test_a_real_unknown_outcome_still_arms_the_emergency_stop(self):
+        fake = AutoMT5()
+        fake.send_none = True  # order_send answers nothing: the outcome is truly unknown
+        result = self.send(fake)
+        self.assertEqual(result["state"], "uncertain")
+        self.assertTrue(self.store.killed())
+
     def test_the_order_comment_stays_short_enough_for_metatrader(self):
         # a real decision id is a 36-character uuid; MetaTrader rejects a comment of 30 characters or more
         import uuid
